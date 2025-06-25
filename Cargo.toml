@@ -1,0 +1,10 @@
+[package]
+name = "plate_solving"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rawloader = "0.37" # Or the latest version available
+image = "0.25"     # Or the latest version available
+plotters = "0.3"
+imageproc = "0.25.0"

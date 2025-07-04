@@ -5,11 +5,9 @@ use plotters::prelude::*;
 
 
 use std::fmt;
-
 pub const STAR_THREESHOLD: f32 = 0.2;
 pub const PIXEL_SIZE_MICRON: f64 = 6.0;
 pub const TELESCOPE_FOCAL_LENGHT: f64 = 1200.0;
-pub const IMAGE_BINNING_FACTOR: u8 = 1;
 
 
 
@@ -156,68 +154,55 @@ pub fn get_image_size(file_path: &Path) -> Result<(usize, usize), Box<dyn std::e
     Ok((raw_image.width, raw_image.height))
 }
 
-pub fn get_pixel_matrix_from_dng(file_path: &Path) -> Result<Vec<Vec<u16>>, Box<dyn std::error::Error>> {
-    // Attempt to decode the RAW file (e.g., DNG)
-    let raw_image = decode_file(file_path)?;
-
-    let width = raw_image.width;
-    let height = raw_image.height;
-    let total_pixels = width * height;
-
-    // Handle images with zero area (e.g., width or height is 0)
-    if total_pixels == 0 {
-        // Return an empty matrix if the image has no pixels
+/// Reads a DNG (or other RAW) into a flat list of pixels whose
+/// (x, y) coordinates are measured from the center of the frame.
+/// 
+/// Returned Vec has entries `(xc, yc, value)` where
+///   xc = column_index – (width/2)
+///   yc = row_index    – (height/2)
+/// so that `(0,0)` is the exact center of the image.
+pub fn get_pixel_matrix_from_dng(
+    file_path: &Path,
+) -> Result<Vec<(i32, i32, u16)>, Box<dyn std::error::Error>> {
+    // decode DNG into raw image
+    let raw = decode_file(file_path)?;
+    let w = raw.width as usize;
+    let h = raw.height as usize;
+    let tot = w.checked_mul(h).ok_or("image too large")?;
+    if tot == 0 {
         return Ok(Vec::new());
     }
 
-    // Extract pixel data into a 1D Vec<u16>.
-    // Integer data is used directly.
-    // Float data is assumed to be normalized (0.0-1.0) and is scaled to u16 range [0, 16383].
-    // This scaling (to 2^14 - 1) matches the histogram processing in the provided main function.
-    let pixel_data_1d: Vec<u16> = match raw_image.data {
-        RawImageData::Integer(data) => {
-            if data.len() < total_pixels {
-                return Err(format!(
-                    "Integer pixel data is insufficient. Expected at least {} elements, but found {}.",
-                    total_pixels,
-                    data.len()
-                )
-                .into());
-            }
-            // Take the first 'total_pixels' elements, in case the buffer is larger.
-            data.into_iter().take(total_pixels).collect()
-        }
-        RawImageData::Float(data) => {
-            if data.len() < total_pixels {
-                return Err(format!(
-                    "Float pixel data is insufficient. Expected at least {} elements, but found {}.",
-                    total_pixels,
-                    data.len()
-                )
-                .into());
-            }
-            // Scale float values (assumed 0.0-1.0) to u16 range (0-16383) and collect.
-            data.into_iter()
-                .take(total_pixels)
-                .map(|val| (val.clamp(0.0, 1.0) * (2.0_f32.powi(BITDEPTH as i32) - 1.0)) as u16)
-                .collect()
+    // pull out u16 data (integer or float→scaled)
+    let flat: Vec<u16> = match raw.data {
+        RawImageData::Integer(v) => v,
+        RawImageData::Float(v) => {
+            let maxval = (2u32.pow(BITDEPTH as u32) - 1) as f32;
+            v.into_iter()
+             .map(|f| (f.clamp(0.0, 1.0) * maxval) as u16)
+             .collect()
         }
     };
 
-    // Reshape the 1D pixel data (Vec<u16>) into a 2D matrix (Vec<Vec<u16>>)
-    // The matrix will have 'height' rows, each row containing 'width' pixel values.
-    let mut matrix: Vec<Vec<u16>> = Vec::with_capacity(height);
-    for i in 0..height {
-        let row_start_index = i * width;
-        let row_end_index = row_start_index + width;
-        // Create a new vector for the row from a slice of pixel_data_1d.
-        // This is safe because pixel_data_1d is confirmed to have total_pixels elements.
-        matrix.push(pixel_data_1d[row_start_index..row_end_index].to_vec());
+    if flat.len() < tot {
+        return Err("Incomplete image data".into());
     }
 
-    Ok(matrix)
+    // compute center offsets
+    let cx = (w / 2) as i32;
+    let cy = (h / 2) as i32;
 
+    // build Vec<(x_centered, y_centered, value)>
+    let mut out = Vec::with_capacity(tot);
+    for r in 0..h {
+        for c in 0..w {
+            let idx = r * w + c;
+            let val = flat[idx];
+            out.push(((c as i32) - cx, (r as i32) - cy, val));
+        }
+    }
 
+    Ok(out)
 }
 
 
@@ -254,7 +239,7 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
         flat_data.extend_from_slice(row);
     }
 
-    // Stretch pixel values by a factor of 10 and clamp to u16::MAX.
+    // Stretch pixel values by a factor of 4 and clamp to u16::MAX.
     for pixel_value in flat_data.iter_mut() {
         *pixel_value = (*pixel_value as u32 * 4).min(u16::MAX as u32) as u16;
     }
@@ -284,67 +269,81 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
 }
 
 
-pub fn calculate_star_barycenters(pixel_matrix: &Vec<Vec<u16>>) -> Vec<StarBarycenter> {
-    let mut barycenters = Vec::new();
-    if pixel_matrix.is_empty() || pixel_matrix[0].is_empty() {
-        return barycenters;
+pub fn calculate_star_barycenters(
+    pixels: &[(i32, i32, u16)],
+    width: usize,
+    height: usize,
+) -> Vec<StarBarycenter> {
+    if pixels.is_empty() {
+        return Vec::new();
     }
 
-    let height = pixel_matrix.len();
-    let width = pixel_matrix[0].len();
-    let star_threshold = ((2.0_f32.powi(BITDEPTH as i32) - 1.0) * STAR_THREESHOLD) as u16; // Adjusted threshold for star detection
-    let mut visited = vec![vec![false; width]; height];
+    let star_threshold = ((2.0_f32.powi(BITDEPTH as i32) - 1.0) * STAR_THREESHOLD) as u16;
 
-    for r in 0..height {
-        for c in 0..width {
-            if pixel_matrix[r][c] > star_threshold && !visited[r][c] {
-                // Found a new potential star, start BFS
-                let mut weighted_x_sum_star = 0.0;
-                let mut weighted_y_sum_star = 0.0;
-                let mut total_mass_star = 0.0;
-                
-                let mut queue = VecDeque::new();
-                queue.push_back((r, c));
-                visited[r][c] = true;
+    // Create a map for quick lookup of pixel values by centered coordinates
+    let pixel_map: std::collections::HashMap<(i32, i32), u16> =
+        pixels.iter().map(|&(x, y, val)| ((x, y), val)).collect();
 
-                while let Some((curr_r, curr_c)) = queue.pop_front() {
-                    let pixel_value = pixel_matrix[curr_r][curr_c];
-                    // No need to check threshold again if only adding valid pixels to queue,
-                    // but good for safety if logic changes.
-                    // if pixel_value > star_threshold { // Already ensured by initial check and neighbor check
-                    let mass = pixel_value as f64;
-                    weighted_x_sum_star += curr_c as f64 * mass; // x is column index
-                    weighted_y_sum_star += curr_r as f64 * mass; // y is row index
-                    total_mass_star += mass;
+    let mut visited: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    let mut barycenters = Vec::new();
 
-                    // Check 8-connectivity neighbors
-                    for dr in -1..=1 {
-                        for dc in -1..=1 {
-                            if dr == 0 && dc == 0 {
-                                continue;
-                            }
+    let cx = (width / 2) as i32;
+    let cy = (height / 2) as i32;
 
-                            let nr = curr_r as isize + dr;
-                            let nc = curr_c as isize + dc;
+    for r_idx in 0..height {
+        for c_idx in 0..width {
+            let x = c_idx as i32 - cx;
+            let y = r_idx as i32 - cy;
+            let coord = (x, y);
 
-                            if nr >= 0 && nr < height as isize && nc >= 0 && nc < width as isize {
-                                let nr_usize = nr as usize;
-                                let nc_usize = nc as usize;
-                                if pixel_matrix[nr_usize][nc_usize] > star_threshold && !visited[nr_usize][nc_usize] {
-                                    visited[nr_usize][nc_usize] = true;
-                                    queue.push_back((nr_usize, nc_usize));
+            if !visited.contains(&coord) {
+                if let Some(&pixel_value) = pixel_map.get(&coord) {
+                    if pixel_value > star_threshold {
+                        // Found a new potential star, start BFS
+                        let mut weighted_x_sum_star = 0.0;
+                        let mut weighted_y_sum_star = 0.0;
+                        let mut total_mass_star = 0.0;
+                        let mut star_pixels = 0;
+
+                        let mut queue = VecDeque::new();
+                        queue.push_back(coord);
+                        visited.insert(coord);
+
+                        while let Some((curr_x, curr_y)) = queue.pop_front() {
+                            if let Some(&val) = pixel_map.get(&(curr_x, curr_y)) {
+                                let mass = val as f64;
+                                weighted_x_sum_star += curr_x as f64 * mass;
+                                weighted_y_sum_star += curr_y as f64 * mass;
+                                total_mass_star += mass;
+                                star_pixels += 1;
+
+                                // Check 8-connectivity neighbors
+                                for dy in -1..=1 {
+                                    for dx in -1..=1 {
+                                        if dx == 0 && dy == 0 {
+                                            continue;
+                                        }
+                                        let neighbor_coord = (curr_x + dx, curr_y + dy);
+                                        if !visited.contains(&neighbor_coord) {
+                                            if let Some(&neighbor_val) = pixel_map.get(&neighbor_coord) {
+                                                if neighbor_val > star_threshold {
+                                                    visited.insert(neighbor_coord);
+                                                    queue.push_back(neighbor_coord);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                    // }
-                }
 
-                if total_mass_star > 0.0 {
-                    barycenters.push((
-                        weighted_x_sum_star / total_mass_star,
-                        weighted_y_sum_star / total_mass_star,
-                    ));
+                        if total_mass_star > 0.0 && star_pixels > 2 { // Ensure star is at least 3 pixels
+                            barycenters.push((
+                                weighted_x_sum_star / total_mass_star,
+                                weighted_y_sum_star / total_mass_star,
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -377,37 +376,41 @@ pub fn calculate_distance_matrix(
     distance_matrix
 }
 
-pub fn returns_all_star_quads(stars: &[StarBarycenter], number_of_star_by_quads : usize) -> Vec<StarQuad> {
+
+pub fn returns_all_star_quads(stars: &[StarBarycenter], number_of_star_by_quads: usize) -> Vec<StarQuad> {
+    if stars.len() < number_of_star_by_quads {
+        return Vec::new();
+    }
     let distance_mat: Vec<Vec<f64>> = calculate_distance_matrix(stars);
     let n: usize = stars.len();
 
     let mut star_quads_vec: Vec<StarQuad> = Vec::new();
 
     for i in 0..n {
-        let distance_to_current_star = &distance_mat[i];
+        let mut star_with_distances: Vec<(usize, f64)> = distance_mat[i]
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx != i)
+            .map(|(idx, &dist)| (idx, dist))
+            .collect();
 
-        let mut star_with_distances: Vec<(StarBarycenter, f64)>  = Vec::new();
-
-        for j in 0..n {
-            star_with_distances.push((stars[j], distance_to_current_star[j]));
-        }
-
-        // Sort star_with_distances by distance (ascending)
+        // Sort other stars by distance (ascending)
         star_with_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-        // Take the first `number_of_star_by_quads` stars (excluding the current star itself)
-        let mut closest_stars: Vec<StarBarycenter> = Vec::new();
-
+        // Take the current star and the `number_of_star_by_quads - 1` closest ones
+        let mut closest_stars: Vec<StarBarycenter> = Vec::with_capacity(number_of_star_by_quads);
         closest_stars.push(stars[i]); // Always include the current star
 
-        for (star, _) in star_with_distances.iter().take(number_of_star_by_quads) {
-                closest_stars.push(*star);
+        for (star_idx, _) in star_with_distances.iter().take(number_of_star_by_quads - 1) {
+            closest_stars.push(stars[*star_idx]);
         }
-        star_quads_vec.push(StarQuad::new(closest_stars));
+        
+        if closest_stars.len() == number_of_star_by_quads {
+            star_quads_vec.push(StarQuad::new(closest_stars));
+        }
     }
 
     star_quads_vec
-
 }
 
 

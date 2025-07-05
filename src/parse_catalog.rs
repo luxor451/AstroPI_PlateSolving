@@ -1,98 +1,60 @@
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
-use std::path::Path;
+use reqwest::blocking::Client;
+use std::collections::HashMap;
 
-/// Represents a star with its coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Star {
-    /// Right Ascension in degrees.
-    pub ra: f64,
-    /// Declination in degrees.
-    pub dec: f64,
-}
+use crate::coordinate::*;
 
-/// Finds stars from a catalog file within a specified square field of view.
-///
-/// # Arguments
-///
-/// * `catalog_path` - The path to the catalog.dat file.
-/// * `center_ra` - The Right Ascension of the center of the FOV in degrees.
-/// * `center_dec` - The Declination of the center of the FOV in degrees.
-/// * `fov_arcsec` - The width and height of the square FOV in arcseconds.
-///
-/// # Returns
-///
-/// A `Result` containing a vector of `Star` structs that are within the FOV,
-/// or an `io::Error` if the file cannot be read.
-pub fn find_stars_in_fov(
-    catalog_path: &str,
-    center_ra: f64,
-    center_dec: f64,
-    fov_arcsec: f64,
-) -> io::Result<Vec<Star>> {
-    let path = Path::new(catalog_path);
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
 
-    let fov_deg = fov_arcsec / 3600.0;
-    let half_fov_deg = fov_deg / 2.0;
 
-    // Define the search area
-    let min_ra = center_ra - half_fov_deg;
-    let max_ra = center_ra + half_fov_deg;
-    let min_dec = center_dec - half_fov_deg;
-    let max_dec = center_dec + half_fov_deg;
+pub fn get_stars_from_catalogue(center_coordinate : &CoordinateEquatorial , fov : f64, nb_of_star : usize) -> Result<Vec<Star>, Box<dyn std::error::Error>> {
+    let client = Client::new();
 
-    let mut stars_in_fov = Vec::new();
+    let (ra, dec) = center_coordinate.to_degrees();
+    let fov = fov / 3600.0; // Convert arcseconds to degrees
 
-    for line in reader.lines() {
-        let line = line?;
-        let parts: Vec<&str> = line.split('|').collect();
+    println!("Searching for stars in FOV centered at RA: {:.6}, DEC: {:.6} with FOV: {:.6} degrees", ra, dec, fov);
 
-        // The format seems to have RA at index 2 and Dec at index 3
-        if parts.len() > 3 {
-            if let (Ok(ra), Ok(dec)) = (parts[2].trim().parse::<f64>(), parts[3].trim().parse::<f64>()) {
-                // Check if the star is within the square FOV
-                if ra >= min_ra && ra <= max_ra && dec >= min_dec && dec <= max_dec {
-                    stars_in_fov.push(Star { ra, dec });
-                }
-            }
+
+    let query = format!(
+        r#"
+        SELECT TOP {nb_of_star} *
+        FROM "I/322A/out"
+        WHERE 1=CONTAINS(POINT('ICRS', RAJ2000, DEJ2000), BOX('ICRS', {ra}, {dec}, {fov}, {fov}))
+        ORDER BY Vmag
+        "#,
+        nb_of_star = nb_of_star,
+        ra = ra,
+        dec = dec,
+        fov = fov
+    );
+
+    let mut form = HashMap::new();
+    form.insert("REQUEST", "doQuery");
+    form.insert("LANG", "ADQL");
+    form.insert("FORMAT", "json");
+    form.insert("QUERY", &query);
+
+    let json: serde_json::Value = client
+        .post("http://tapvizier.u-strasbg.fr/TAPVizieR/tap/sync")
+        .form(&form)
+        .send()?
+        .json()?;
+
+    let metadata = json["metadata"].as_array().unwrap();
+    let ra_idx = metadata.iter().position(|m| m["name"] == "RAJ2000").unwrap();
+    let dec_idx = metadata.iter().position(|m| m["name"] == "DEJ2000").unwrap();
+
+    let mut res = Vec::with_capacity(nb_of_star);
+    
+    if let Some(data) = json["data"].as_array() {
+        for entry in data {
+            let ra = entry[ra_idx].as_f64().unwrap();
+            let dec = entry[dec_idx].as_f64().unwrap();
+            res.push(Star {
+                ra,
+                dec,
+            });
         }
     }
 
-    Ok(stars_in_fov)
-}
-
-
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    #[test]
-    fn test_find_stars_in_fov() {
-        let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "9537 00375 1| |10.001|-20.001|...").unwrap(); // Inside
-        writeln!(file, "9537 00379 1| |10.002|-19.999|...").unwrap(); // Inside
-        writeln!(file, "9537 00380 1| |10.1|-20.0|...").unwrap();     // Outside (RA too high)
-        writeln!(file, "9537 00387 1| |9.9|-20.0|...").unwrap();      // Outside (RA too low)
-        writeln!(file, "9537 00388 1| |10.0|-19.9|...").unwrap();     // Outside (Dec too high)
-        writeln!(file, "9537 00389 1| |10.0|-20.1|...").unwrap();     // Outside (Dec too low)
-        writeln!(file, "bad line").unwrap();                         // Invalid line
-
-        let catalog_path = file.path().to_str().unwrap();
-        let center_ra = 10.0;
-        let center_dec = -20.0;
-        // 1 degree = 3600 arcseconds. 0.01 deg = 36 arcsec.
-        let fov_arcsec = 36.0; // +/- 0.005 degrees from center
-
-        let stars = find_stars_in_fov(catalog_path, center_ra, center_dec, fov_arcsec).unwrap();
-
-        assert_eq!(stars.len(), 2);
-        assert_eq!(stars[0], Star { ra: 10.001, dec: -20.001 });
-        assert_eq!(stars[1], Star { ra: 10.002, dec: -19.999 });
-    }
+    Ok(res)
 }

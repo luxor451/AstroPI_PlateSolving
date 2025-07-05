@@ -1,25 +1,20 @@
 use rawloader::{decode_file, RawImageData};
 use std::path::Path;
 use std::collections::VecDeque; 
-use plotters::prelude::*;
-
-
 use std::fmt;
+
+
 pub const STAR_THREESHOLD: f32 = 0.2;
 pub const PIXEL_SIZE_MICRON: f64 = 6.0;
 pub const TELESCOPE_FOCAL_LENGHT: f64 = 1200.0;
 
-
-
-
 const BITDEPTH: u16 = 14; 
 
-
-type StarBarycenter = (f64, f64);
+pub type StarPosXY = (f64, f64);
 
 #[derive(Debug, Clone)]
 pub struct StarQuad {
-    pub stars : Vec<StarBarycenter>,
+    pub stars : Vec<StarPosXY>,
     pub barycenter: (f64, f64),
     pub largest_distance: f64,
     pub normalized_distances: Vec<f64>,
@@ -61,8 +56,27 @@ impl fmt::Display for StarQuad {
 
 
 
+
 impl StarQuad {
-    pub fn new(stars : Vec<StarBarycenter>) -> Self {
+    /**
+     * Creates a new `StarQuad` from a given vector of stars.
+     *
+     * This function calculates the properties of the star quad. It first computes the
+     * barycenter (geometric center) of the provided stars. Then, it calculates all
+     * pairwise distances between the stars, identifies the largest distance, and uses it
+     * to normalize all other distances. The normalized distances are then sorted in
+     * descending order.
+     *
+     * # Arguments
+     *
+     * * `stars` - A vector of `StarPosXY` tuples, where each tuple represents the (x, y) coordinates of a star.
+     *
+     * # Returns
+     *
+     * A new `StarQuad` instance containing the original stars, their barycenter, the largest
+     * pairwise distance, and a sorted vector of normalized distances.
+     */
+    pub fn new(stars : Vec<StarPosXY>) -> Self {
 
         let n = stars.len();
 
@@ -97,54 +111,6 @@ impl StarQuad {
 
 
 
-
-pub fn plot_histogram_to_png(
-    bins_data: &Vec<(&u16, &u32)>,
-    output_path: &str,
-    title: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if bins_data.is_empty() {
-        eprintln!("No data to plot for histogram.");
-        return Ok(());
-    }
-
-    let root = BitMapBackend::new(output_path, (1024, 768)).into_drawing_area();
-    root.fill(&WHITE)?;
-
-    let max_count = bins_data.iter().map(|&(_, count)| *count).max().unwrap_or(1) as f64;
-    // Determine the max bin start value for x-axis range
-    let max_bin_start = bins_data.last().map_or(16300, |&(bin_val, _)| *bin_val);
-
-
-    let mut chart = ChartBuilder::on(&root)
-        .caption(title, ("sans-serif", 50).into_font())
-        .margin(10)
-        .x_label_area_size(50)
-        .y_label_area_size(80)
-        .build_cartesian_2d(0u32..(max_bin_start as u32 + 100u32), 0f64..max_count * 1.1)?;
-
-    chart
-        .configure_mesh()
-        .x_desc("Pixel Value Bins")
-        .y_desc("Count")
-        .axis_desc_style(("sans-serif", 15))
-        .draw()?;
-
-    chart.draw_series(
-        bins_data.iter().map(|&(bin_start, count)| {
-            let x0 = *bin_start as u32;
-            let x1 = (bin_start + 99) as u32; // Bin width is 100
-            let y = *count as f64;
-            let mut rect = Rectangle::new([(x0, 0.0), (x1, y)], BLUE.filled());
-            rect.set_margin(0,0,1,1); // Add small margin between bars
-            rect
-        }),
-    )?;
-
-    root.present()?;
-    println!("Histogram saved to {}", output_path);
-    Ok(())
-}
 
 pub fn get_image_size(file_path: &Path) -> Result<(usize, usize), Box<dyn std::error::Error>> {
     // Attempt to decode the RAW file (e.g., DNG)
@@ -206,74 +172,12 @@ pub fn get_pixel_matrix_from_dng(
 }
 
 
-pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Result<(), image::ImageError> {
-    if matrix.is_empty() {
-        return Err(image::ImageError::Parameter(
-            image::error::ParameterError::from_kind(
-                image::error::ParameterErrorKind::DimensionMismatch,
-            ),
-        ));
-    }
-
-    let height = matrix.len();
-    let width = matrix[0].len();
-
-    if width == 0 { 
-        return Err(image::ImageError::Parameter(
-            image::error::ParameterError::from_kind(
-                image::error::ParameterErrorKind::DimensionMismatch,
-            ),
-        ));
-    }
-
-    // Flatten the Vec<Vec<u16>> into Vec<u16> for ImageBuffer.
-    let mut flat_data: Vec<u16> = Vec::with_capacity(width * height);
-    for row in matrix {
-        if row.len() != width {
-            return Err(image::ImageError::Parameter(
-                image::error::ParameterError::from_kind(
-                    image::error::ParameterErrorKind::DimensionMismatch, 
-                ),
-            ));
-        }
-        flat_data.extend_from_slice(row);
-    }
-
-    // Stretch pixel values by a factor of 4 and clamp to u16::MAX.
-    for pixel_value in flat_data.iter_mut() {
-        *pixel_value = (*pixel_value as u32 * 4).min(u16::MAX as u32) as u16;
-    }
-
-    // Create an ImageBuffer for Luma<u16> (16-bit grayscale).
-    // `ImageBuffer::from_raw` takes ownership of `flat_data`.
-    // It returns Some(image_buffer) if successful, None if data length doesn't match dimensions.
-    let image_buffer = match image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(width as u32, height as u32, flat_data) {
-        Some(buffer) => buffer,
-        None => {
-            // This case implies flat_data.len() != width * height * num_channels,
-            // which should be caught by earlier checks or indicate an internal logic error.
-            return Err(image::ImageError::Parameter(
-                image::error::ParameterError::from_kind(
-                    image::error::ParameterErrorKind::DimensionMismatch, // Data length issue
-                ),
-            ));
-        }
-    };
-
-    // Save the image buffer to a PNG file.
-    // The image crate infers the format from the file extension.
-    image_buffer.save(output_path)?;
-
-    println!("PNG image saved to {}", output_path);
-    Ok(())
-}
-
 
 pub fn calculate_star_barycenters(
     pixels: &[(i32, i32, u16)],
     width: usize,
     height: usize,
-) -> Vec<StarBarycenter> {
+) -> Vec<StarPosXY> {
     if pixels.is_empty() {
         return Vec::new();
     }
@@ -351,7 +255,7 @@ pub fn calculate_star_barycenters(
     barycenters
 }
 
-pub fn distance_between_stars(star1: &StarBarycenter, star2: &StarBarycenter,) -> f64 {
+pub fn distance_between_stars(star1: &StarPosXY, star2: &StarPosXY,) -> f64 {
     let dx = star1.0 - star2.0;
     let dy = star1.1 - star2.1;
     (dx * dx + dy * dy).sqrt()
@@ -377,7 +281,7 @@ pub fn calculate_distance_matrix(
 }
 
 
-pub fn returns_all_star_quads(stars: &[StarBarycenter], number_of_star_by_quads: usize) -> Vec<StarQuad> {
+pub fn returns_all_star_quads(stars: &[StarPosXY], number_of_star_by_quads: usize) -> Vec<StarQuad> {
     if stars.len() < number_of_star_by_quads {
         return Vec::new();
     }
@@ -398,7 +302,7 @@ pub fn returns_all_star_quads(stars: &[StarBarycenter], number_of_star_by_quads:
         star_with_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
         // Take the current star and the `number_of_star_by_quads - 1` closest ones
-        let mut closest_stars: Vec<StarBarycenter> = Vec::with_capacity(number_of_star_by_quads);
+        let mut closest_stars: Vec<StarPosXY> = Vec::with_capacity(number_of_star_by_quads);
         closest_stars.push(stars[i]); // Always include the current star
 
         for (star_idx, _) in star_with_distances.iter().take(number_of_star_by_quads - 1) {

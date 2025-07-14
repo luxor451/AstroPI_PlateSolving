@@ -41,6 +41,12 @@ impl Arcdegrees {
     }
 }
 
+impl std::fmt::Display for Arcdegrees {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}° {}' {:.2}\"", self.degrees, self.arcminutes, self.arcseconds)
+    }
+}
+
 impl RaHoursMinutesSeconds {
     pub fn new(hours: i64, minutes: i64, seconds: f64) -> Self {
         RaHoursMinutesSeconds {
@@ -51,7 +57,7 @@ impl RaHoursMinutesSeconds {
     }
 
     pub fn to_arcdegrees(&self) -> Arcdegrees {
-        let total_seconds = (self.hours * 3600 + self.minutes * 60 + self.seconds as i64) as f64;
+        let total_seconds = (self.hours * 3600 + self.minutes * 60) as f64 + self.seconds * 60.0;
         let degrees = total_seconds / 240.0; // 1 hour = 15 degrees, so 1 second = 15/3600 degrees
         let arcminutes = (degrees.fract() * 60.0) as i64;
         let arcseconds = (degrees.fract() * 3600.0).fract() * 60.0;
@@ -60,14 +66,22 @@ impl RaHoursMinutesSeconds {
     }
 
     pub fn to_degrees(&self) -> f64 {
-        let total_seconds = (self.hours * 3600 + self.minutes * 60) as f64 + self.seconds * 60.0;
-        total_seconds / 240.0 // 1 hour = 15 degrees, so 1 second = 15/3600 degrees
+
+        (360.0 / 24.0) * (self.hours as f64 + (self.minutes as f64 / 60.0) + (self.seconds / 3600.0))
     }
 
     pub fn to_radians(&self) -> f64 {
         self.to_degrees() * std::f64::consts::PI / 180.0
     }
 }
+
+impl std::fmt::Display for RaHoursMinutesSeconds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}h {}m {:.2}s", self.hours, self.minutes, self.seconds)
+    }
+}
+
+
 
 impl CoordinateEquatorial {
     pub fn new(ra: RaHoursMinutesSeconds, dec: Arcdegrees) -> Self {
@@ -84,5 +98,32 @@ impl CoordinateEquatorial {
         let ra_rad = self.ra.to_radians();
         let dec_rad = self.dec.to_radians();
         (ra_rad, dec_rad)
+    }
+
+    pub fn from_radians(ra_rad: f64, dec_rad: f64) -> Self {
+       
+        // Convert RA from radians to total hours
+        let total_ra_hours = ra_rad * 12.0 / std::f64::consts::PI;
+        let ra_h = total_ra_hours.trunc() as i64;
+        let ra_m_total = total_ra_hours.fract() * 60.0;
+        let ra_m = ra_m_total.trunc() as i64;
+        let ra_s = ra_m_total.fract() * 60.0;
+        let ra = RaHoursMinutesSeconds::new(ra_h, ra_m, ra_s);
+
+        // Convert Dec from radians to total degrees
+        let total_dec_degrees = dec_rad.to_degrees();
+        let dec_d = total_dec_degrees.trunc() as i64;
+        let dec_m_total = total_dec_degrees.abs().fract() * 60.0;
+        let dec_m = dec_m_total.trunc() as i64;
+        let dec_s = dec_m_total.fract() * 60.0;
+        let dec = Arcdegrees::new(dec_d, dec_m, dec_s);
+
+        CoordinateEquatorial { ra, dec }
+    }
+}
+
+impl std::fmt::Display for CoordinateEquatorial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RA: {}, Dec: {}", self.ra, self.dec)
     }
 }

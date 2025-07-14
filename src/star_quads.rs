@@ -2,6 +2,7 @@ use rawloader::{decode_file, RawImageData};
 use std::path::Path;
 use std::collections::VecDeque; 
 use std::fmt;
+use itertools::Itertools;
 
 
 pub const STAR_THREESHOLD: f32 = 0.2;
@@ -14,21 +15,10 @@ pub type StarPosXY = (f64, f64);
 
 #[derive(Debug, Clone)]
 pub struct StarQuad {
-    pub stars : Vec<StarPosXY>,
+    pub stars : [StarPosXY; 4],
     pub barycenter: (f64, f64),
     pub largest_distance: f64,
-    pub normalized_distances: Vec<f64>,
-}
-
-pub fn max_from_vec(vec: &Vec<f64>) -> f64 {
-    let mut res = 0.0;
-    for &value in vec {
-        if value > res {
-            res = value;
-        }
-    };
-
-    return res
+    pub normalized_distances: [f64; 6],
 }
 
 impl fmt::Display for StarQuad {
@@ -50,7 +40,7 @@ impl fmt::Display for StarQuad {
             }
             write!(f, "{:.4}", dist)?;
         }
-        write!(f, "]")
+        write!(f, "]\n")
     }
 }
 
@@ -76,24 +66,29 @@ impl StarQuad {
      * A new `StarQuad` instance containing the original stars, their barycenter, the largest
      * pairwise distance, and a sorted vector of normalized distances.
      */
-    pub fn new(stars : Vec<StarPosXY>) -> Self {
+    pub fn new(stars : [StarPosXY; 4]) -> Self {
 
         let n = stars.len();
 
         let x = stars.iter().map(|(x, _)| *x).sum::<f64>() / n as f64;
         let y = stars.iter().map(|(_, y)| *y).sum::<f64>() / n as f64;
 
-        let mut distances = Vec::new();
+        let distances : [f64; 6] = [
+            distance_between_stars(&stars[0], &stars[1]),
+            distance_between_stars(&stars[0], &stars[2]),
+            distance_between_stars(&stars[0], &stars[3]),
+
+            distance_between_stars(&stars[1], &stars[2]),
+            distance_between_stars(&stars[1], &stars[3]),
+
+            distance_between_stars(&stars[2], &stars[3])
+        ];
         
-        for i in 0..n {
-            for j in (i + 1)..n {
-                distances.push(distance_between_stars(&stars[i], &stars[j]));
-            }
-        }
+        
 
-        let biggest_distance = max_from_vec(&distances);
+        let biggest_distance = distances.into_iter().fold(0.0, f64::max);
 
-        let mut normalized_distances: Vec<f64> = distances.iter().map(|&d| d / biggest_distance).collect();
+        let mut normalized_distances: [f64; 6] = distances.map(|d| d / biggest_distance);
 
         normalized_distances.sort_by(|a, b| b.partial_cmp(a).unwrap());
 
@@ -106,31 +101,114 @@ impl StarQuad {
         
     }
 
+    pub fn compare(&self, other: &StarQuad, tolerance: f64) -> bool {
+        let matches = self.normalized_distances.iter()
+            .zip(other.normalized_distances.iter())
+            .filter(|(d1, d2)| (*d1 - *d2).abs() <= tolerance)
+            .count();
+
+        matches >= 5
+    }
 }
 
+
+
+pub struct StarGraph {
+    pub stars: Vec<StarPosXY>,
+    pub adj: Vec<Vec<usize>>,
+}
+
+impl StarGraph {
+    /// Creates a new StarGraph connecting each star to its `num_neighbors` nearest neighbors.
+    pub fn new(stars: &[StarPosXY]) -> Self {
+        let n = stars.len();
+        if n == 0 {
+            return StarGraph {
+                stars: Vec::new(),
+                adj: Vec::new(),
+            };
+        }
+
+        let distance_matrix = calculate_distance_matrix(stars);
+        let mut adj = vec![Vec::new(); n];
+
+        for i in 0..n {
+            let neighbors = distance_matrix[i]
+                .iter()
+                .enumerate()
+                .sorted_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(idx, _)| idx)
+                .take(4)
+                .collect::<Vec<usize>>();
+            adj[i] = neighbors;
+        }
+
+        StarGraph {
+            stars: stars.to_vec(),
+            adj,
+        }
+    }
+
+    /// Finds all stars at a distance of n hops from a given start_node_idx.
+    /// Uses Breadth-First Search (BFS).
+    ///
+    /// # Arguments
+    /// * `start_node_idx` - The index of the starting star in the graph's `stars` vector.
+    /// * `n` - The number of hops (edges) away from the start node.
+    ///
+    /// # Returns
+    /// A `Vec<StarPosXY>` containing the stars at exactly distance `n`.
+    /// Returns `None` if `start_node_idx` is out of bounds.
+    pub fn find_stars_at_distance_n(&self, start_node_idx: usize, n: usize) -> Option<Vec<StarPosXY>> {
+        if start_node_idx >= self.stars.len() {
+            return None;
+        }
+
+        if n == 0 {
+            return Some(vec![self.stars[start_node_idx]]);
+        }
+
+        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+        queue.push_back((start_node_idx, 0));
+
+        let mut visited: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        visited.insert(start_node_idx);
+
+        let mut result_indices = Vec::new();
+
+        while let Some((current_node, distance)) = queue.pop_front() {
+            if distance == n {
+                result_indices.push(current_node);
+                continue; // Don't explore further from this node
+            }
+
+            if distance > n {
+                break; // Optimization: no need to check deeper nodes
+            }
+
+            for &neighbor in &self.adj[current_node] {
+                if !visited.contains(&neighbor) {
+                    visited.insert(neighbor);
+                    queue.push_back((neighbor, distance + 1));
+                }
+            }
+        }
+
+        Some(result_indices.into_iter().map(|idx| self.stars[idx]).collect())
+    }
+}
 
 
 
 
 pub fn get_image_size(file_path: &Path) -> Result<(usize, usize), Box<dyn std::error::Error>> {
-    // Attempt to decode the RAW file (e.g., DNG)
     let raw_image = decode_file(file_path)?;
-
-    // Return the width and height of the image
     Ok((raw_image.width, raw_image.height))
 }
 
-/// Reads a DNG (or other RAW) into a flat list of pixels whose
-/// (x, y) coordinates are measured from the center of the frame.
-/// 
-/// Returned Vec has entries `(xc, yc, value)` where
-///   xc = column_index – (width/2)
-///   yc = row_index    – (height/2)
-/// so that `(0,0)` is the exact center of the image.
 pub fn get_pixel_matrix_from_dng(
     file_path: &Path,
 ) -> Result<Vec<(i32, i32, u16)>, Box<dyn std::error::Error>> {
-    // decode DNG into raw image
     let raw = decode_file(file_path)?;
     let w = raw.width as usize;
     let h = raw.height as usize;
@@ -139,7 +217,6 @@ pub fn get_pixel_matrix_from_dng(
         return Ok(Vec::new());
     }
 
-    // pull out u16 data (integer or float→scaled)
     let flat: Vec<u16> = match raw.data {
         RawImageData::Integer(v) => v,
         RawImageData::Float(v) => {
@@ -154,11 +231,9 @@ pub fn get_pixel_matrix_from_dng(
         return Err("Incomplete image data".into());
     }
 
-    // compute center offsets
     let cx = (w / 2) as i32;
     let cy = (h / 2) as i32;
 
-    // build Vec<(x_centered, y_centered, value)>
     let mut out = Vec::with_capacity(tot);
     for r in 0..h {
         for c in 0..w {
@@ -281,40 +356,23 @@ pub fn calculate_distance_matrix(
 }
 
 
-pub fn returns_all_star_quads(stars: &[StarPosXY], number_of_star_by_quads: usize) -> Vec<StarQuad> {
-    if stars.len() < number_of_star_by_quads {
-        return Vec::new();
-    }
-    let distance_mat: Vec<Vec<f64>> = calculate_distance_matrix(stars);
-    let n: usize = stars.len();
 
-    let mut star_quads_vec: Vec<StarQuad> = Vec::new();
 
-    for i in 0..n {
-        let mut star_with_distances: Vec<(usize, f64)> = distance_mat[i]
-            .iter()
-            .enumerate()
-            .filter(|(idx, _)| *idx != i)
-            .map(|(idx, &dist)| (idx, dist))
-            .collect();
 
-        // Sort other stars by distance (ascending)
-        star_with_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-        // Take the current star and the `number_of_star_by_quads - 1` closest ones
-        let mut closest_stars: Vec<StarPosXY> = Vec::with_capacity(number_of_star_by_quads);
-        closest_stars.push(stars[i]); // Always include the current star
+pub fn returns_all_star_quads(stars: &[StarPosXY], n: usize) -> Vec<StarQuad> {
+    let mut res = Vec::new();
 
-        for (star_idx, _) in star_with_distances.iter().take(number_of_star_by_quads - 1) {
-            closest_stars.push(stars[*star_idx]);
-        }
-        
-        if closest_stars.len() == number_of_star_by_quads {
-            star_quads_vec.push(StarQuad::new(closest_stars));
-        }
+    let distance_matrix = calculate_distance_matrix(stars);
+
+    for row in distance_matrix.iter() {
+        let clossest_stars = row.iter().enumerate().sorted_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+
+        let nth_clossest = clossest_stars.map(|(idx, _)| stars[idx]).take(4).collect::<Vec<_>>().try_into().unwrap();
+
+        res.push(StarQuad::new(nth_clossest));
     }
 
-    star_quads_vec
+    res
 }
-
 

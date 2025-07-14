@@ -53,7 +53,7 @@ pub fn plot_histogram_to_png(
     )?;
 
     root.present()?;
-    println!("Histogram saved to {}", output_path);
+    // println!("Histogram saved to {}", output_path);
     Ok(())
 }
 
@@ -116,7 +116,7 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
     // The image crate infers the format from the file extension.
     image_buffer.save(output_path)?;
 
-    println!("PNG image saved to {}", output_path);
+    // println!("PNG image saved to {}", output_path);
     Ok(())
 }
 
@@ -162,7 +162,7 @@ pub fn annotate_stars_on_image<P: AsRef<Path>>(
 
         // Draw lines for star quads
         let white_color = Rgb([255u8, 255u8, 255u8]);
-        println!("Drawing lines for {} star quad(s).", star_quads.len());
+        // println!("Drawing lines for {} star quad(s).", star_quads.len());
         for quad in star_quads {
             if quad.stars.len() > 1 {
                 let central_star = quad.stars[0];
@@ -182,7 +182,7 @@ pub fn annotate_stars_on_image<P: AsRef<Path>>(
         }
 
         img_rgb.save(&output_path)?;
-        println!("Successfully drew circles and quad lines on {} and re-saved.", output_path.as_ref().display());
+        // println!("Successfully drew circles and quad lines on {} and re-saved.", output_path.as_ref().display());
     }
 
     Ok(())

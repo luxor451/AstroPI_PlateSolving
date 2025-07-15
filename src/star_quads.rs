@@ -5,7 +5,7 @@ use std::fmt;
 use itertools::Itertools;
 
 
-pub const STAR_THREESHOLD: f32 = 0.2;
+pub const STAR_THREESHOLD: f32 = 0.15;
 pub const PIXEL_SIZE_MICRON: f64 = 6.0;
 pub const TELESCOPE_FOCAL_LENGHT: f64 = 1200.0;
 
@@ -138,7 +138,7 @@ impl StarGraph {
                 .enumerate()
                 .sorted_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                 .map(|(idx, _)| idx)
-                .take(4)
+                .take(3)
                 .collect::<Vec<usize>>();
             adj[i] = neighbors;
         }
@@ -157,15 +157,11 @@ impl StarGraph {
     /// * `n` - The number of hops (edges) away from the start node.
     ///
     /// # Returns
-    /// A `Vec<StarPosXY>` containing the stars at exactly distance `n`.
+    /// A `Vec<StarPosXY>` containing the stars at distance <= `n`.
     /// Returns `None` if `start_node_idx` is out of bounds.
-    pub fn find_stars_at_distance_n(&self, start_node_idx: usize, n: usize) -> Option<Vec<StarPosXY>> {
+    pub fn find_stars_within_distance(&self, start_node_idx: usize, n: usize) -> Option<Vec<StarPosXY>> {
         if start_node_idx >= self.stars.len() {
             return None;
-        }
-
-        if n == 0 {
-            return Some(vec![self.stars[start_node_idx]]);
         }
 
         let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
@@ -175,20 +171,17 @@ impl StarGraph {
         visited.insert(start_node_idx);
 
         let mut result_indices = Vec::new();
+        result_indices.push(start_node_idx); // Add the starting node (distance 0)
 
         while let Some((current_node, distance)) = queue.pop_front() {
-            if distance == n {
-                result_indices.push(current_node);
+            if distance >= n {
                 continue; // Don't explore further from this node
-            }
-
-            if distance > n {
-                break; // Optimization: no need to check deeper nodes
             }
 
             for &neighbor in &self.adj[current_node] {
                 if !visited.contains(&neighbor) {
                     visited.insert(neighbor);
+                    result_indices.push(neighbor);
                     queue.push_back((neighbor, distance + 1));
                 }
             }
@@ -197,6 +190,8 @@ impl StarGraph {
         Some(result_indices.into_iter().map(|idx| self.stars[idx]).collect())
     }
 }
+
+
 
 
 
@@ -363,16 +358,26 @@ pub fn calculate_distance_matrix(
 pub fn returns_all_star_quads(stars: &[StarPosXY], n: usize) -> Vec<StarQuad> {
     let mut res = Vec::new();
 
-    let distance_matrix = calculate_distance_matrix(stars);
 
-    for row in distance_matrix.iter() {
-        let clossest_stars = row.iter().enumerate().sorted_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+    let star_graph = StarGraph::new(stars);
 
-        let nth_clossest = clossest_stars.map(|(idx, _)| stars[idx]).take(4).collect::<Vec<_>>().try_into().unwrap();
-
-        res.push(StarQuad::new(nth_clossest));
+    for i in 0..star_graph.stars.len() {
+        if let Some(nearby_stars) = star_graph.find_stars_within_distance(i, n) {
+            let combination = nearby_stars.iter().combinations(4);
+            for quad in combination {
+                if quad.len() == 4 {
+                    let star_quad = StarQuad::new([
+                        *quad[0],
+                        *quad[1],
+                        *quad[2],
+                        *quad[3],
+                    ]);
+                    res.push(star_quad);
+                }
+            }
+        }
     }
-
     res
-}
 
+   
+}

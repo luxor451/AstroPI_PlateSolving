@@ -10,7 +10,7 @@ use parse_catalog::*;
 use coordinate::*;
 use printing::*;
 
-const MATCHED_TOLERANCE: f64 = 1.0; // Tolerance for matching star quads
+const MATCHED_TOLERANCE: f64 = 0.0009; // Tolerance for matching star quads
 
 
 fn get_quad_from_file(file_path: &Path, verbose : bool) -> Result<(Vec<StarQuad>, Vec<(i32, i32, u16)>, Vec<(f64, f64)>), Box<dyn std::error::Error>> {
@@ -175,15 +175,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let nb_of_star = star_barycenters.len();
 
-    annotate_stars_on_image(
-        &centered_pixels,
-        image_x_size,
-        image_y_size,
-        &star_barycenters,
-        &star_quads,
-        "annotated_image.png",
-        15,
-    )?;
+    println!("Found {} star barycenters in the image.", nb_of_star);
+
+    // annotate_stars_on_image(
+    //     &centered_pixels,
+    //     image_x_size,
+    //     image_y_size,
+    //     &star_barycenters,
+    //     &star_quads,
+    //     "annotated_image.png",
+    //     15,
+    // )?;
 
     let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGHT; 
 
@@ -207,7 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<(f64, f64)>>();
 
 
-    let star_quad_from_cat = returns_all_star_quads(&vec_star, 10);
+    let star_quad_from_cat = returns_all_star_quads(&vec_star, 2);
 
     println!("Found {} star quads from catalogue.", star_quad_from_cat.len());
 
@@ -234,6 +236,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         matched_quad_cat.push(elem.1.clone());
     }
 
+    println!("Found {} matches between image and catalogue.", matches);
+
 
     annotate_stars_on_image(
         &[],
@@ -256,32 +260,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
 
-    if matches > 2 {
-        let (a1, b1, c1, a2, b2, c2) = solve_transformation(&matched_quads, pixel_resolution)?;
-        println!("Solved transformation matrix:");
-        println!("starDatabaseX = {:.4} * cameraX + {:.4} * cameraY + {:.4}", a1, b1, c1);
-        println!("starDatabaseY = {:.4} * cameraX + {:.4} * cameraY + {:.4}", a2, b2, c2);
+    // if matches > 2 {
+    //     let (a1, b1, c1, a2, b2, c2) = solve_transformation(&matched_quads, pixel_resolution)?;
+    //     println!("Solved transformation matrix:");
+    //     println!("starDatabaseX = {:.4} * cameraX + {:.4} * cameraY + {:.4}", a1, b1, c1);
+    //     println!("starDatabaseY = {:.4} * cameraX + {:.4} * cameraY + {:.4}", a2, b2, c2);
 
-        // The center of the image in camera coordinates is (0, 0)
-        let center_x_proj = c1; // a1*0 + b1*0 + c1
-        let center_y_proj = c2; // a2*0 + b2*0 + c2
+    //     // The center of the image in camera coordinates is (0, 0)
+    //     let center_x_proj = c1; // a1*0 + b1*0 + c1
+    //     let center_y_proj = c2; // a2*0 + b2*0 + c2
 
-        let (center_ra_rad, center_dec_rad) = get_equatorial_from_xy(
-            center_x_proj, 
-            center_y_proj, 
-            initial_coord.ra.to_radians(), 
-            initial_coord.dec.to_radians()
-        );
+    //     let (center_ra_rad, center_dec_rad) = get_equatorial_from_xy(
+    //         center_x_proj, 
+    //         center_y_proj, 
+    //         initial_coord.ra.to_radians(), 
+    //         initial_coord.dec.to_radians()
+    //     );
 
-        let solved_coord = CoordinateEquatorial::from_radians(center_ra_rad, center_dec_rad);
+    //     let solved_coord = CoordinateEquatorial::from_radians(center_ra_rad, center_dec_rad);
 
-        println!("\nSolved Image Center Coordinates:");
-        println!("Right Ascension: {}", solved_coord.ra);
-        println!("Declination: {}", solved_coord.dec);
+    //     println!("\nSolved Image Center Coordinates:");
+    //     println!("Right Ascension: {}", solved_coord.ra);
+    //     println!("Declination: {}", solved_coord.dec);
 
-    } else {
-        println!("Not enough matches found to determine the transformation matrix.");
-    }
+    // } else {
+    //     println!("Not enough matches found to determine the transformation matrix.");
+    // }
     
     Ok(())
 }

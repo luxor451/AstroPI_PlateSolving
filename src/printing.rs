@@ -1,13 +1,10 @@
 use image::Rgb; // For defining the red color
 use imageproc::drawing::{draw_hollow_circle_mut, draw_line_segment_mut}; // For drawing circles
+use plotters::prelude::*;
 use std::error::Error;
 use std::path::Path;
-use plotters::prelude::*;
-
 
 use crate::star_quads::*;
-
-
 
 pub fn plot_histogram_to_png(
     bins_data: &Vec<(&u16, &u32)>,
@@ -22,10 +19,13 @@ pub fn plot_histogram_to_png(
     let root = BitMapBackend::new(output_path, (1024, 768)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let max_count = bins_data.iter().map(|&(_, count)| *count).max().unwrap_or(1) as f64;
+    let max_count = bins_data
+        .iter()
+        .map(|&(_, count)| *count)
+        .max()
+        .unwrap_or(1) as f64;
     // Determine the max bin start value for x-axis range
     let max_bin_start = bins_data.last().map_or(16300, |&(bin_val, _)| *bin_val);
-
 
     let mut chart = ChartBuilder::on(&root)
         .caption(title, ("sans-serif", 50).into_font())
@@ -41,24 +41,24 @@ pub fn plot_histogram_to_png(
         .axis_desc_style(("sans-serif", 15))
         .draw()?;
 
-    chart.draw_series(
-        bins_data.iter().map(|&(bin_start, count)| {
-            let x0 = *bin_start as u32;
-            let x1 = (bin_start + 99) as u32; // Bin width is 100
-            let y = *count as f64;
-            let mut rect = Rectangle::new([(x0, 0.0), (x1, y)], BLUE.filled());
-            rect.set_margin(0,0,1,1); // Add small margin between bars
-            rect
-        }),
-    )?;
+    chart.draw_series(bins_data.iter().map(|&(bin_start, count)| {
+        let x0 = *bin_start as u32;
+        let x1 = (bin_start + 99) as u32; // Bin width is 100
+        let y = *count as f64;
+        let mut rect = Rectangle::new([(x0, 0.0), (x1, y)], BLUE.filled());
+        rect.set_margin(0, 0, 1, 1); // Add small margin between bars
+        rect
+    }))?;
 
     root.present()?;
     // println!("Histogram saved to {}", output_path);
     Ok(())
 }
 
-
-pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Result<(), image::ImageError> {
+pub fn save_pixel_matrix_to_png(
+    matrix: &Vec<Vec<u16>>,
+    output_path: &str,
+) -> Result<(), image::ImageError> {
     if matrix.is_empty() {
         return Err(image::ImageError::Parameter(
             image::error::ParameterError::from_kind(
@@ -70,7 +70,7 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
     let height = matrix.len();
     let width = matrix[0].len();
 
-    if width == 0 { 
+    if width == 0 {
         return Err(image::ImageError::Parameter(
             image::error::ParameterError::from_kind(
                 image::error::ParameterErrorKind::DimensionMismatch,
@@ -84,7 +84,7 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
         if row.len() != width {
             return Err(image::ImageError::Parameter(
                 image::error::ParameterError::from_kind(
-                    image::error::ParameterErrorKind::DimensionMismatch, 
+                    image::error::ParameterErrorKind::DimensionMismatch,
                 ),
             ));
         }
@@ -99,7 +99,11 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
     // Create an ImageBuffer for Luma<u16> (16-bit grayscale).
     // `ImageBuffer::from_raw` takes ownership of `flat_data`.
     // It returns Some(image_buffer) if successful, None if data length doesn't match dimensions.
-    let image_buffer = match image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(width as u32, height as u32, flat_data) {
+    let image_buffer = match image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(
+        width as u32,
+        height as u32,
+        flat_data,
+    ) {
         Some(buffer) => buffer,
         None => {
             // This case implies flat_data.len() != width * height * num_channels,
@@ -119,7 +123,6 @@ pub fn save_pixel_matrix_to_png(matrix: &Vec<Vec<u16>>,output_path: &str) -> Res
     // println!("PNG image saved to {}", output_path);
     Ok(())
 }
-
 
 /// Reconstructs a grayscale PNG from your centered pixels, then overlays
 /// red circles at each `(x,y)` barycenter, and re­saves it.
@@ -145,7 +148,10 @@ pub fn annotate_stars_on_image<P: AsRef<Path>>(
     }
 
     // 2) save as grayscale
-    save_pixel_matrix_to_png(&pixel_matrix, output_path.as_ref().to_str().ok_or("Invalid output path")?)?;
+    save_pixel_matrix_to_png(
+        &pixel_matrix,
+        output_path.as_ref().to_str().ok_or("Invalid output path")?,
+    )?;
 
     // 3) reopen, draw circles, re-save
     if !star_positions.is_empty() {
@@ -167,16 +173,17 @@ pub fn annotate_stars_on_image<P: AsRef<Path>>(
             if quad.stars.len() > 1 {
                 let central_star = quad.stars[0];
                 // Convert centered star coordinates to image coordinates
-                let central_point = ((central_star.0 as i32 + cx) as f32, (central_star.1 as i32 + cy) as f32);
+                let central_point = (
+                    (central_star.0 as i32 + cx) as f32,
+                    (central_star.1 as i32 + cy) as f32,
+                );
 
                 for neighbor_star in quad.stars.iter().skip(1) {
-                    let neighbor_point = ((neighbor_star.0 as i32 + cx) as f32, (neighbor_star.1 as i32 + cy) as f32);
-                    draw_line_segment_mut(
-                        &mut img_rgb,
-                        central_point,
-                        neighbor_point,
-                        white_color,
+                    let neighbor_point = (
+                        (neighbor_star.0 as i32 + cx) as f32,
+                        (neighbor_star.1 as i32 + cy) as f32,
                     );
+                    draw_line_segment_mut(&mut img_rgb, central_point, neighbor_point, white_color);
                 }
             }
         }

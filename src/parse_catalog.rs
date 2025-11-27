@@ -3,16 +3,20 @@ use std::collections::HashMap;
 
 use crate::coordinate::*;
 
-
-
-pub fn get_stars_from_catalogue(center_coordinate : &CoordinateEquatorial , fov : f64, nb_of_star : usize) -> Result<Vec<Star>, Box<dyn std::error::Error>> {
+pub fn get_stars_from_catalogue(
+    center_coordinate: &CoordinateEquatorial,
+    fov: f64,
+    nb_of_star: usize,
+) -> Result<Vec<Star>, Box<dyn std::error::Error>> {
     let client = Client::new();
 
     let (ra, dec) = center_coordinate.to_degrees();
     let fov = fov / 3600.0; // Convert arcseconds to degrees
 
-    println!("Searching for stars in FOV centered at RA: {:.6}, DEC: {:.6} with FOV: {:.6} degrees", ra, dec, fov);
-
+    println!(
+        "Searching for stars in FOV centered at RA: {:.6}, DEC: {:.6} with FOV: {:.6} degrees",
+        ra, dec, fov
+    );
 
     let query = format!(
         r#"
@@ -40,19 +44,22 @@ pub fn get_stars_from_catalogue(center_coordinate : &CoordinateEquatorial , fov 
         .json()?;
 
     let metadata = json["metadata"].as_array().unwrap();
-    let ra_idx = metadata.iter().position(|m| m["name"] == "RAJ2000").unwrap();
-    let dec_idx = metadata.iter().position(|m| m["name"] == "DEJ2000").unwrap();
+    let ra_idx = metadata
+        .iter()
+        .position(|m| m["name"] == "RAJ2000")
+        .unwrap();
+    let dec_idx = metadata
+        .iter()
+        .position(|m| m["name"] == "DEJ2000")
+        .unwrap();
 
     let mut res = Vec::with_capacity(nb_of_star);
-    
+
     if let Some(data) = json["data"].as_array() {
         for entry in data {
             let ra = entry[ra_idx].as_f64().unwrap();
             let dec = entry[dec_idx].as_f64().unwrap();
-            res.push(Star {
-                ra,
-                dec,
-            });
+            res.push(Star { ra, dec });
         }
     }
 

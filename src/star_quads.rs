@@ -1,21 +1,20 @@
-use rawloader::{decode_file, RawImageData};
-use std::path::Path;
-use std::collections::VecDeque; 
-use std::fmt;
 use itertools::Itertools;
-
+use rawloader::{RawImageData, decode_file};
+use std::collections::VecDeque;
+use std::fmt;
+use std::path::Path;
 
 pub const STAR_THREESHOLD: f32 = 0.15;
 pub const PIXEL_SIZE_MICRON: f64 = 6.0;
 pub const TELESCOPE_FOCAL_LENGHT: f64 = 1200.0;
 
-const BITDEPTH: u16 = 14; 
+const BITDEPTH: u16 = 14;
 
 pub type StarPosXY = (f64, f64);
 
 #[derive(Debug, Clone)]
 pub struct StarQuad {
-    pub stars : [StarPosXY; 4],
+    pub stars: [StarPosXY; 4],
     pub barycenter: (f64, f64),
     pub largest_distance: f64,
     pub normalized_distances: [f64; 6],
@@ -23,7 +22,11 @@ pub struct StarQuad {
 
 impl fmt::Display for StarQuad {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "  Barycenter: ({:.2}, {:.2})", self.barycenter.0, self.barycenter.1)?;
+        writeln!(
+            f,
+            "  Barycenter: ({:.2}, {:.2})",
+            self.barycenter.0, self.barycenter.1
+        )?;
         writeln!(f, "  Largest Distance: {:.2}", self.largest_distance)?;
         write!(f, "  Stars: [")?;
         for (i, star) in self.stars.iter().enumerate() {
@@ -44,9 +47,6 @@ impl fmt::Display for StarQuad {
     }
 }
 
-
-
-
 impl StarQuad {
     /**
      * Creates a new `StarQuad` from a given vector of stars.
@@ -66,25 +66,20 @@ impl StarQuad {
      * A new `StarQuad` instance containing the original stars, their barycenter, the largest
      * pairwise distance, and a sorted vector of normalized distances.
      */
-    pub fn new(stars : [StarPosXY; 4]) -> Self {
-
+    pub fn new(stars: [StarPosXY; 4]) -> Self {
         let n = stars.len();
 
         let x = stars.iter().map(|(x, _)| *x).sum::<f64>() / n as f64;
         let y = stars.iter().map(|(_, y)| *y).sum::<f64>() / n as f64;
 
-        let distances : [f64; 6] = [
+        let distances: [f64; 6] = [
             distance_between_stars(&stars[0], &stars[1]),
             distance_between_stars(&stars[0], &stars[2]),
             distance_between_stars(&stars[0], &stars[3]),
-
             distance_between_stars(&stars[1], &stars[2]),
             distance_between_stars(&stars[1], &stars[3]),
-
-            distance_between_stars(&stars[2], &stars[3])
+            distance_between_stars(&stars[2], &stars[3]),
         ];
-        
-        
 
         let biggest_distance = distances.into_iter().fold(0.0, f64::max);
 
@@ -96,13 +91,14 @@ impl StarQuad {
             barycenter: (x, y),
             largest_distance: biggest_distance,
             normalized_distances: normalized_distances,
-            stars : stars,
+            stars: stars,
         }
-        
     }
 
     pub fn compare(&self, other: &StarQuad, tolerance: f64) -> bool {
-        let matches = self.normalized_distances.iter()
+        let matches = self
+            .normalized_distances
+            .iter()
             .zip(other.normalized_distances.iter())
             .filter(|(d1, d2)| (*d1 - *d2).abs() <= tolerance)
             .count();
@@ -110,8 +106,6 @@ impl StarQuad {
         matches >= 5
     }
 }
-
-
 
 pub struct StarGraph {
     pub stars: Vec<StarPosXY>,
@@ -159,7 +153,11 @@ impl StarGraph {
     /// # Returns
     /// A `Vec<StarPosXY>` containing the stars at distance <= `n`.
     /// Returns `None` if `start_node_idx` is out of bounds.
-    pub fn find_stars_within_distance(&self, start_node_idx: usize, n: usize) -> Option<Vec<StarPosXY>> {
+    pub fn find_stars_within_distance(
+        &self,
+        start_node_idx: usize,
+        n: usize,
+    ) -> Option<Vec<StarPosXY>> {
         if start_node_idx >= self.stars.len() {
             return None;
         }
@@ -187,14 +185,14 @@ impl StarGraph {
             }
         }
 
-        Some(result_indices.into_iter().map(|idx| self.stars[idx]).collect())
+        Some(
+            result_indices
+                .into_iter()
+                .map(|idx| self.stars[idx])
+                .collect(),
+        )
     }
 }
-
-
-
-
-
 
 pub fn get_image_size(file_path: &Path) -> Result<(usize, usize), Box<dyn std::error::Error>> {
     let raw_image = decode_file(file_path)?;
@@ -217,8 +215,8 @@ pub fn get_pixel_matrix_from_dng(
         RawImageData::Float(v) => {
             let maxval = (2u32.pow(BITDEPTH as u32) - 1) as f32;
             v.into_iter()
-             .map(|f| (f.clamp(0.0, 1.0) * maxval) as u16)
-             .collect()
+                .map(|f| (f.clamp(0.0, 1.0) * maxval) as u16)
+                .collect()
         }
     };
 
@@ -240,8 +238,6 @@ pub fn get_pixel_matrix_from_dng(
 
     Ok(out)
 }
-
-
 
 pub fn calculate_star_barycenters(
     pixels: &[(i32, i32, u16)],
@@ -299,7 +295,9 @@ pub fn calculate_star_barycenters(
                                         }
                                         let neighbor_coord = (curr_x + dx, curr_y + dy);
                                         if !visited.contains(&neighbor_coord) {
-                                            if let Some(&neighbor_val) = pixel_map.get(&neighbor_coord) {
+                                            if let Some(&neighbor_val) =
+                                                pixel_map.get(&neighbor_coord)
+                                            {
                                                 if neighbor_val > star_threshold {
                                                     visited.insert(neighbor_coord);
                                                     queue.push_back(neighbor_coord);
@@ -311,7 +309,8 @@ pub fn calculate_star_barycenters(
                             }
                         }
 
-                        if total_mass_star > 0.0 && star_pixels > 2 { // Ensure star is at least 3 pixels
+                        if total_mass_star > 0.0 && star_pixels > 2 {
+                            // Ensure star is at least 3 pixels
                             barycenters.push((
                                 weighted_x_sum_star / total_mass_star,
                                 weighted_y_sum_star / total_mass_star,
@@ -325,16 +324,13 @@ pub fn calculate_star_barycenters(
     barycenters
 }
 
-pub fn distance_between_stars(star1: &StarPosXY, star2: &StarPosXY,) -> f64 {
+pub fn distance_between_stars(star1: &StarPosXY, star2: &StarPosXY) -> f64 {
     let dx = star1.0 - star2.0;
     let dy = star1.1 - star2.1;
     (dx * dx + dy * dy).sqrt()
 }
 
-
-pub fn calculate_distance_matrix(
-    barycenters: &[(f64, f64)],
-) -> Vec<Vec<f64>> {
+pub fn calculate_distance_matrix(barycenters: &[(f64, f64)]) -> Vec<Vec<f64>> {
     let n = barycenters.len();
     let mut distance_matrix = vec![vec![0.0; n]; n];
 
@@ -350,14 +346,8 @@ pub fn calculate_distance_matrix(
     distance_matrix
 }
 
-
-
-
-
-
 pub fn returns_all_star_quads(stars: &[StarPosXY], n: usize) -> Vec<StarQuad> {
     let mut res = Vec::new();
-
 
     let star_graph = StarGraph::new(stars);
 
@@ -366,18 +356,11 @@ pub fn returns_all_star_quads(stars: &[StarPosXY], n: usize) -> Vec<StarQuad> {
             let combination = nearby_stars.iter().combinations(4);
             for quad in combination {
                 if quad.len() == 4 {
-                    let star_quad = StarQuad::new([
-                        *quad[0],
-                        *quad[1],
-                        *quad[2],
-                        *quad[3],
-                    ]);
+                    let star_quad = StarQuad::new([*quad[0], *quad[1], *quad[2], *quad[3]]);
                     res.push(star_quad);
                 }
             }
         }
     }
     res
-
-   
 }

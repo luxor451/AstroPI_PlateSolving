@@ -48,24 +48,19 @@ impl fmt::Display for StarQuad {
 }
 
 impl StarQuad {
-    /**
-     * Creates a new `StarQuad` from a given vector of stars.
-     *
-     * This function calculates the properties of the star quad. It first computes the
-     * barycenter (geometric center) of the provided stars. Then, it calculates all
-     * pairwise distances between the stars, identifies the largest distance, and uses it
-     * to normalize all other distances. The normalized distances are then sorted in
-     * descending order.
-     *
-     * # Arguments
-     *
-     * * `stars` - A vector of `StarPosXY` tuples, where each tuple represents the (x, y) coordinates of a star.
-     *
-     * # Returns
-     *
-     * A new `StarQuad` instance containing the original stars, their barycenter, the largest
-     * pairwise distance, and a sorted vector of normalized distances.
-     */
+    /// Creates a new `StarQuad` from four stars.
+    ///
+    /// Computes the barycenter, all pairwise distances, and normalizes distances
+    /// by the largest distance. Normalized distances are sorted in descending order
+    /// for use in quad matching.
+    ///
+    /// # Arguments
+    ///
+    /// * `stars` - An array of 4 `StarPosXY` tuples representing star coordinates.
+    ///
+    /// # Returns
+    ///
+    /// A new `StarQuad` instance with computed properties.
     pub fn new(stars: [StarPosXY; 4]) -> Self {
         let n = stars.len();
 
@@ -95,6 +90,16 @@ impl StarQuad {
         }
     }
 
+    /// Compares two star quads for similarity based on normalized distances.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The star quad to compare against.
+    /// * `tolerance` - Maximum allowed difference between normalized distances.
+    ///
+    /// # Returns
+    ///
+    /// `true` if at least 5 out of 6 normalized distances match within tolerance.
     pub fn compare(&self, other: &StarQuad, tolerance: f64) -> bool {
         let matches = self
             .normalized_distances
@@ -113,7 +118,15 @@ pub struct StarGraph {
 }
 
 impl StarGraph {
-    /// Creates a new StarGraph connecting each star to its `num_neighbors` nearest neighbors.
+    /// Creates a new StarGraph connecting each star to its 3 nearest neighbors.
+    ///
+    /// # Arguments
+    ///
+    /// * `stars` - Slice of star positions to build the graph from.
+    ///
+    /// # Returns
+    ///
+    /// A `StarGraph` with adjacency lists for nearest neighbor connections.
     pub fn new(stars: &[StarPosXY]) -> Self {
         let n = stars.len();
         if n == 0 {
@@ -143,16 +156,16 @@ impl StarGraph {
         }
     }
 
-    /// Finds all stars at a distance of n hops from a given start_node_idx.
-    /// Uses Breadth-First Search (BFS).
+    /// Finds all stars within n hops from a starting star using BFS.
     ///
     /// # Arguments
-    /// * `start_node_idx` - The index of the starting star in the graph's `stars` vector.
-    /// * `n` - The number of hops (edges) away from the start node.
+    ///
+    /// * `start_node_idx` - Index of the starting star.
+    /// * `n` - Maximum number of hops (graph edges) to traverse.
     ///
     /// # Returns
-    /// A `Vec<StarPosXY>` containing the stars at distance <= `n`.
-    /// Returns `None` if `start_node_idx` is out of bounds.
+    ///
+    /// `Some(Vec<StarPosXY>)` containing stars within distance n, or `None` if index is invalid.
     pub fn find_stars_within_distance(
         &self,
         start_node_idx: usize,
@@ -194,11 +207,29 @@ impl StarGraph {
     }
 }
 
+/// Extracts image dimensions from a DNG file.
+///
+/// # Arguments
+///
+/// * `file_path` - Path to the DNG file.
+///
+/// # Returns
+///
+/// A tuple `(width, height)` representing the image dimensions in pixels.
 pub fn get_image_size(file_path: &Path) -> Result<(usize, usize), Box<dyn std::error::Error>> {
     let raw_image = decode_file(file_path)?;
     Ok((raw_image.width, raw_image.height))
 }
 
+/// Extracts pixel data from a DNG file with coordinates centered at the image center.
+///
+/// # Arguments
+///
+/// * `file_path` - Path to the DNG file.
+///
+/// # Returns
+///
+/// A vector of `(x, y, value)` tuples where coordinates are centered at the image center.
 pub fn get_pixel_matrix_from_dng(
     file_path: &Path,
 ) -> Result<Vec<(i32, i32, u16)>, Box<dyn std::error::Error>> {
@@ -239,6 +270,24 @@ pub fn get_pixel_matrix_from_dng(
     Ok(out)
 }
 
+
+/// Calculates the barycenters (centroids) of star regions in an image.
+///
+///
+/// **Note:** This is a naive approach that should be refined for better performance.
+///
+/// # Arguments
+///
+/// * `pixels` - A slice of tuples `(x, y, value)` representing pixel coordinates
+///              (centered at image center) and their brightness values.
+/// * `width` - The width of the image in pixels.
+/// * `height` - The height of the image in pixels.
+///
+/// # Returns
+///
+/// A `Vec<StarPosXY>` containing the (x, y) coordinates of each detected star's barycenter,
+/// with coordinates centered at the image center. Returns an empty vector if no stars are found
+/// or if the input is empty.
 pub fn calculate_star_barycenters(
     pixels: &[(i32, i32, u16)],
     width: usize,
@@ -324,12 +373,32 @@ pub fn calculate_star_barycenters(
     barycenters
 }
 
+/// Calculates the Euclidean distance between two stars.
+///
+/// # Arguments
+///
+/// * `star1` - First star position (x, y).
+/// * `star2` - Second star position (x, y).
+///
+/// # Returns
+///
+/// The distance between the two stars.
 pub fn distance_between_stars(star1: &StarPosXY, star2: &StarPosXY) -> f64 {
     let dx = star1.0 - star2.0;
     let dy = star1.1 - star2.1;
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Computes the pairwise distance matrix for a set of star positions.
+///
+/// # Arguments
+///
+/// * `barycenters` - Slice of star positions.
+///
+/// # Returns
+///
+/// A 2D matrix where `matrix[i][j]` is the distance from star i to star j.
+/// Diagonal elements are set to `f64::MAX`.
 pub fn calculate_distance_matrix(barycenters: &[(f64, f64)]) -> Vec<Vec<f64>> {
     let n = barycenters.len();
     let mut distance_matrix = vec![vec![0.0; n]; n];
@@ -346,6 +415,16 @@ pub fn calculate_distance_matrix(barycenters: &[(f64, f64)]) -> Vec<Vec<f64>> {
     distance_matrix
 }
 
+/// Generates all possible star quads from a set of stars using graph-based neighbor search.
+///
+/// # Arguments
+///
+/// * `stars` - Slice of star positions.
+/// * `n` - Maximum number of graph hops to search for neighboring stars.
+///
+/// # Returns
+///
+/// A vector of all `StarQuad` instances formed from combinations of nearby stars.
 pub fn returns_all_star_quads(stars: &[StarPosXY], n: usize) -> Vec<StarQuad> {
     let mut res = Vec::new();
 

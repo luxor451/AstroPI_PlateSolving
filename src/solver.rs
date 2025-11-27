@@ -1,5 +1,18 @@
 use nalgebra::{DMatrix, DVector};
 
+/// Solves for transformation coefficients mapping image coordinates to reference coordinates.
+///
+/// Uses SVD to solve the problem: `A*x = b`
+///
+/// # Arguments
+///
+/// * `ref_quad` - Reference coordinate values (catalog positions).
+/// * `img_quad_x` - X coordinates from the image.
+/// * `img_quad_y` - Y coordinates from the image.
+///
+/// # Returns
+///
+/// A tuple `(x_1, x_2, x_3)` representing the transformation coefficients.
 pub fn solve_projection(
     ref_quad: &Vec<f64>,
     img_quad_x: &Vec<f64>,

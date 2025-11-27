@@ -3,6 +3,17 @@ use std::collections::HashMap;
 
 use crate::coordinate::*;
 
+/// Queries the UCAC5 star catalog via VizieR TAP service for stars within a field of view.
+///
+/// # Arguments
+///
+/// * `center_coordinate` - Center position (RA/Dec) of the search region.
+/// * `fov` - Field of view size in arcseconds.
+/// * `nb_of_star` - Maximum number of stars to retrieve, ordered by brightness (Vmag).
+///
+/// # Returns
+///
+/// A vector of `Star` objects containing RA/Dec coordinates in degrees.
 pub fn get_stars_from_catalogue(
     center_coordinate: &CoordinateEquatorial,
     fov: f64,

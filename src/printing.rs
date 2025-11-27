@@ -1,5 +1,5 @@
-use image::Rgb; // For defining the red color
-use imageproc::drawing::{draw_hollow_circle_mut, draw_line_segment_mut}; // For drawing circles
+use image::Rgb; 
+use imageproc::drawing::{draw_hollow_circle_mut, draw_line_segment_mut};
 use plotters::prelude::*;
 use std::error::Error;
 use std::path::Path;

@@ -24,7 +24,7 @@ pub fn get_stars_from_catalogue(
     let (ra, dec) = center_coordinate.to_degrees();
     let fov = fov / 3600.0; // Convert arcseconds to degrees
 
-    println!(
+    log::debug!(
         "Searching for stars in FOV centered at RA: {:.6}, DEC: {:.6} with FOV: {:.6} degrees",
         ra, dec, fov
     );

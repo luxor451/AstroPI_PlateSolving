@@ -84,11 +84,6 @@ fn dng_to_png_stretched(
     let black_point = sorted_values[low_idx] as f64;
     let white_point = sorted_values[high_idx] as f64;
 
-    println!(
-        "Histogram stretch: black_point={:.0}, white_point={:.0}",
-        black_point, white_point
-    );
-
     // Apply histogram stretch and convert to 8-bit
     let range = (white_point - black_point).max(1.0);
 
@@ -145,13 +140,6 @@ fn dng_to_png_stretched(
     // Save as PNG
     img.save(output_path)?;
 
-    println!(
-        "Saved stretched image to: {} ({}x{})",
-        output_path.display(),
-        gray_width,
-        gray_height
-    );
-
     Ok(())
 }
 
@@ -164,12 +152,14 @@ fn dng_to_png(input_path: &Path, output_path: &Path) -> Result<(), Box<dyn std::
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let start_time = std::time::Instant::now();
+    // Initialize logger - can be controlled via RUST_LOG env var
+    // e.g., RUST_LOG=debug cargo run, RUST_LOG=trace cargo run
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // Define the initial coordinate estimate
     let initial_coord = CoordinateEquatorial::new(
-        RaHoursMinutesSeconds::new(13, 15, 21.4),
-        Arcdegrees::new(45, 1, 14.40),
+        RaHoursMinutesSeconds::new(14, 15, 21.4),
+        Arcdegrees::new(54, 1, 14.40),
     );
 
     // Path to the DNG file to analyze
@@ -177,68 +167,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Optionally export the DNG as a stretched PNG for visualization
     let png_output = Path::new("test_stretched.png");
-    if let Err(e) = dng_to_png(file_path, png_output) {
-        eprintln!("Warning: Could not create PNG preview: {}", e);
-    }
-
-    println!("Starting plate solving for: {}", file_path.display());
-    println!("Initial coordinates: {}", initial_coord);
-    println!();
+    let _ = dng_to_png(file_path, png_output);
 
     // Solve the plate
-    let result = solve_plate(file_path, &initial_coord, true)?;
+    let result = solve_plate(file_path, &initial_coord)?;
 
     // Display results
-    println!();
-    println!("=== Plate Solving Results ===");
-    println!("Matched stars: {}", result.matched_quads_count);
-    
-    if result.spiral_iterations > 0 {
-        println!("Solution found after {} spiral search iterations", result.spiral_iterations);
-    }
-
-    if let Some(coeffs_x) = result.coeffs_x {
-        println!("Transformation coefficients:");
-        println!("  X: {:?}", coeffs_x);
-        if let Some(coeffs_y) = result.coeffs_y {
-            println!("  Y: {:?}", coeffs_y);
-        }
-        println!();
-
-        // The optical_axis_ra and optical_axis_dec in the result are already
-        // computed using the transformation to find where pixel (0,0) maps to
+    if result.coeffs_x.is_some() {
         let ra_rad = result.optical_axis_ra;
         let dec_rad = result.optical_axis_dec;
-
-        // Convert to human-readable format
         let solved_coord = CoordinateEquatorial::from_radians(ra_rad, dec_rad);
 
-        println!("=== Solved Image Center Coordinates ===");
-        println!("  {}", solved_coord);
-        println!("  RA:  {:.6}°", ra_rad.to_degrees());
-        println!("  Dec: {:.6}°", dec_rad.to_degrees());
-        
-        // Also show offset from initial estimate
-        let initial_ra_deg = initial_coord.ra.to_degrees();
-        let initial_dec_deg = initial_coord.dec.to_degrees();
-        println!();
-        println!("Offset from initial estimate:");
-        println!("  ΔRA:  {:.4}° ({:.1} arcmin)", 
-                 ra_rad.to_degrees() - initial_ra_deg,
-                 (ra_rad.to_degrees() - initial_ra_deg) * 60.0);
-        println!("  ΔDec: {:.4}° ({:.1} arcmin)", 
-                 dec_rad.to_degrees() - initial_dec_deg,
-                 (dec_rad.to_degrees() - initial_dec_deg) * 60.0);
-        println!();
-        println!("Plate solving successful!");
+        println!("RA:  {}", solved_coord.ra);
+        println!("Dec: {}", solved_coord.dec);
+        println!("Position angle: {:.2}°", result.rotation_deg);
     } else {
-        println!();
-        println!("Not enough matches to determine transformation coefficients.");
-        println!("Plate solving incomplete.");
+        eprintln!("Plate solving failed: not enough matches.");
     }
-
-    let duration = start_time.elapsed();
-    println!("Execution time: {:?}", duration);
 
     Ok(())
 }

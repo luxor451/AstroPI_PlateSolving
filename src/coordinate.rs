@@ -40,6 +40,7 @@ impl Arcdegrees {
         self.to_degrees() * std::f64::consts::PI / 180.0
     }
 
+    #[allow(warnings)]
     pub fn from_radians(radians: f64) -> Self {
         let degrees_total = radians.to_degrees();
         let degrees = degrees_total.trunc() as i64;
@@ -72,7 +73,7 @@ impl RaHoursMinutesSeconds {
             seconds,
         }
     }
-
+    #[allow(warnings)]
     pub fn to_arcdegrees(&self) -> Arcdegrees {
         let total_seconds = (self.hours * 3600 + self.minutes * 60) as f64 + self.seconds * 60.0;
         let degrees = total_seconds / 240.0; // 1 hour = 15 degrees, so 1 second = 15/3600 degrees
@@ -90,7 +91,7 @@ impl RaHoursMinutesSeconds {
     pub fn to_radians(&self) -> f64 {
         self.to_degrees() * std::f64::consts::PI / 180.0
     }
-
+    #[allow(warnings)]
     pub fn from_radians(radians: f64) -> Self {
         let degrees = radians.to_degrees();
         let total_hours = degrees / 15.0;
@@ -122,7 +123,7 @@ impl CoordinateEquatorial {
         let dec_deg = self.dec.to_degrees();
         (ra_deg, dec_deg)
     }
-
+    #[allow(warnings)]
     pub fn to_radians(&self) -> (f64, f64) {
         let ra_rad = self.ra.to_radians();
         let dec_rad = self.dec.to_radians();

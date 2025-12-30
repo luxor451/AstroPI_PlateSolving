@@ -273,8 +273,8 @@ pub fn get_pixel_matrix_from_dng(
 
 /// Calculates the barycenters (centroids) of star regions in an image.
 ///
-///
-/// **Note:** This is a naive approach that should be refined for better performance.
+/// Uses flood-fill (BFS) on bright pixels to identify connected star regions
+/// and computes the intensity-weighted centroid for each.
 ///
 /// # Arguments
 ///
@@ -293,83 +293,106 @@ pub fn calculate_star_barycenters(
     width: usize,
     height: usize,
 ) -> Vec<StarPosXY> {
-    if pixels.is_empty() {
+    if pixels.is_empty() || width == 0 || height == 0 {
         return Vec::new();
     }
 
     let star_threshold = ((2.0_f32.powi(BITDEPTH as i32) - 1.0) * STAR_THREESHOLD) as u16;
-
-    // Create a map for quick lookup of pixel values by centered coordinates
-    let pixel_map: std::collections::HashMap<(i32, i32), u16> =
-        pixels.iter().map(|&(x, y, val)| ((x, y), val)).collect();
-
-    let mut visited: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
-    let mut barycenters = Vec::new();
-
+    
     let cx = (width / 2) as i32;
     let cy = (height / 2) as i32;
 
-    for r_idx in 0..height {
-        for c_idx in 0..width {
-            let x = c_idx as i32 - cx;
-            let y = r_idx as i32 - cy;
-            let coord = (x, y);
+    // Use a flat grid for O(1) pixel lookups instead of HashMap
+    // Grid stores pixel values, 0 means no data or below threshold
+    let mut grid: Vec<u16> = vec![0; width * height];
+    
+    // Pre-filter: collect only bright pixels and their positions
+    let mut bright_pixels: Vec<(usize, usize)> = Vec::new();
+    
+    for &(x, y, val) in pixels {
+        // Convert from centered coordinates back to grid indices
+        let col = (x + cx) as usize;
+        let row = (y + cy) as usize;
+        
+        if col < width && row < height {
+            let idx = row * width + col;
+            grid[idx] = val;
+            
+            if val > star_threshold {
+                bright_pixels.push((col, row));
+            }
+        }
+    }
 
-            if !visited.contains(&coord) {
-                if let Some(&pixel_value) = pixel_map.get(&coord) {
-                    if pixel_value > star_threshold {
-                        // Found a new potential star, start BFS
-                        let mut weighted_x_sum_star = 0.0;
-                        let mut weighted_y_sum_star = 0.0;
-                        let mut total_mass_star = 0.0;
-                        let mut star_pixels = 0;
+    // Track visited pixels using a bitset for memory efficiency
+    let mut visited: Vec<bool> = vec![false; width * height];
+    let mut barycenters = Vec::new();
+    
+    // Reusable queue to avoid allocations
+    let mut queue: VecDeque<(usize, usize)> = VecDeque::with_capacity(256);
 
-                        let mut queue = VecDeque::new();
-                        queue.push_back(coord);
-                        visited.insert(coord);
+    // Only iterate over bright pixels, not all pixels
+    for (start_col, start_row) in bright_pixels {
+        let start_idx = start_row * width + start_col;
+        
+        if visited[start_idx] {
+            continue;
+        }
 
-                        while let Some((curr_x, curr_y)) = queue.pop_front() {
-                            if let Some(&val) = pixel_map.get(&(curr_x, curr_y)) {
-                                let mass = val as f64;
-                                weighted_x_sum_star += curr_x as f64 * mass;
-                                weighted_y_sum_star += curr_y as f64 * mass;
-                                total_mass_star += mass;
-                                star_pixels += 1;
+        // Found a new potential star, start BFS
+        let mut weighted_x_sum = 0.0;
+        let mut weighted_y_sum = 0.0;
+        let mut total_mass = 0.0;
+        let mut star_pixels = 0u32;
 
-                                // Check 8-connectivity neighbors
-                                for dy in -1..=1 {
-                                    for dx in -1..=1 {
-                                        if dx == 0 && dy == 0 {
-                                            continue;
-                                        }
-                                        let neighbor_coord = (curr_x + dx, curr_y + dy);
-                                        if !visited.contains(&neighbor_coord) {
-                                            if let Some(&neighbor_val) =
-                                                pixel_map.get(&neighbor_coord)
-                                            {
-                                                if neighbor_val > star_threshold {
-                                                    visited.insert(neighbor_coord);
-                                                    queue.push_back(neighbor_coord);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+        queue.clear();
+        queue.push_back((start_col, start_row));
+        visited[start_idx] = true;
 
-                        if total_mass_star > 0.0 && star_pixels > 2 {
-                            // Ensure star is at least 3 pixels
-                            barycenters.push((
-                                weighted_x_sum_star / total_mass_star,
-                                weighted_y_sum_star / total_mass_star,
-                            ));
-                        }
+        while let Some((col, row)) = queue.pop_front() {
+            let idx = row * width + col;
+            let val = grid[idx];
+            
+            // Convert back to centered coordinates for barycenter calculation
+            let x = col as f64 - cx as f64;
+            let y = row as f64 - cy as f64;
+            
+            let mass = val as f64;
+            weighted_x_sum += x * mass;
+            weighted_y_sum += y * mass;
+            total_mass += mass;
+            star_pixels += 1;
+
+            // Check 8-connectivity neighbors using bounds checking
+            let row_min = row.saturating_sub(1);
+            let row_max = (row + 1).min(height - 1);
+            let col_min = col.saturating_sub(1);
+            let col_max = (col + 1).min(width - 1);
+
+            for nr in row_min..=row_max {
+                for nc in col_min..=col_max {
+                    if nr == row && nc == col {
+                        continue;
+                    }
+                    
+                    let neighbor_idx = nr * width + nc;
+                    
+                    if !visited[neighbor_idx] && grid[neighbor_idx] > star_threshold {
+                        visited[neighbor_idx] = true;
+                        queue.push_back((nc, nr));
                     }
                 }
             }
         }
+
+        if total_mass > 0.0 && star_pixels > 2 {
+            barycenters.push((
+                weighted_x_sum / total_mass,
+                weighted_y_sum / total_mass,
+            ));
+        }
     }
+    
     barycenters
 }
 

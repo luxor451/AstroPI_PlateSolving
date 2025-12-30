@@ -148,6 +148,31 @@ impl CoordinateEquatorial {
 
         CoordinateEquatorial { ra, dec }
     }
+
+    /// Creates a new `CoordinateEquatorial` from RA and Dec in degrees.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ra_deg` - Right Ascension in degrees (0-360).
+    /// * `dec_deg` - Declination in degrees (-90 to +90).
+    pub fn from_degrees(ra_deg: f64, dec_deg: f64) -> Self {
+        // Convert RA from degrees to hours (15 degrees = 1 hour)
+        let total_ra_hours = ra_deg / 15.0;
+        let ra_h = total_ra_hours.trunc() as i64;
+        let ra_m_total = total_ra_hours.fract().abs() * 60.0;
+        let ra_m = ra_m_total.trunc() as i64;
+        let ra_s = ra_m_total.fract() * 60.0;
+        let ra = RaHoursMinutesSeconds::new(ra_h, ra_m, ra_s);
+
+        // Convert Dec from degrees
+        let dec_d = dec_deg.trunc() as i64;
+        let dec_m_total = dec_deg.abs().fract() * 60.0;
+        let dec_m = dec_m_total.trunc() as i64;
+        let dec_s = dec_m_total.fract() * 60.0;
+        let dec = Arcdegrees::new(dec_d, dec_m, dec_s);
+
+        CoordinateEquatorial { ra, dec }
+    }
 }
 
 impl std::fmt::Display for CoordinateEquatorial {

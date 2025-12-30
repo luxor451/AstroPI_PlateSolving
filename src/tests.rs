@@ -229,3 +229,72 @@ mod png_generation_tests {
     }
 }
 
+
+#[cfg(test)]
+mod projection_tests {
+    use crate::platesolve::{get_star_x_y, get_equatorial_from_xy};
+    use std::f64::consts::PI;
+
+    /// Test that forward and inverse projections are consistent
+    #[test]
+    fn test_projection_roundtrip() {
+        let optical_ra_rad = 210.0_f64.to_radians();
+        let optical_dec_rad = 54.0_f64.to_radians();
+        
+        // Test several star positions around the optical axis
+        let test_stars = vec![
+            (211.0_f64.to_radians(), 54.5_f64.to_radians()),  // Slight offset
+            (209.5_f64.to_radians(), 53.5_f64.to_radians()),  // Another offset
+            (210.5_f64.to_radians(), 54.0_f64.to_radians()),  // RA only
+            (210.0_f64.to_radians(), 54.5_f64.to_radians()),  // Dec only
+            (210.0_f64.to_radians(), 54.0_f64.to_radians()),  // Center (should be 0,0)
+        ];
+        
+        for (star_ra, star_dec) in test_stars {
+            // Forward projection: RA/Dec -> x,y (arcseconds)
+            let (x_arcsec, y_arcsec) = get_star_x_y(
+                optical_ra_rad, optical_dec_rad,
+                star_ra, star_dec
+            );
+            
+            // Convert to radians for inverse projection
+            let arcsec_to_rad = PI / (180.0 * 3600.0);
+            let x_rad = x_arcsec * arcsec_to_rad;
+            let y_rad = y_arcsec * arcsec_to_rad;
+            
+            // Inverse projection: x,y (radians) -> RA/Dec
+            let (recovered_ra, recovered_dec) = get_equatorial_from_xy(
+                x_rad, y_rad,
+                optical_ra_rad, optical_dec_rad
+            );
+            
+            // Check round-trip accuracy
+            let ra_error_arcsec = (star_ra - recovered_ra).to_degrees() * 3600.0;
+            let dec_error_arcsec = (star_dec - recovered_dec).to_degrees() * 3600.0;
+            
+            println!("Star: RA={:.4}°, Dec={:.4}°", star_ra.to_degrees(), star_dec.to_degrees());
+            println!("  Projected: x={:.2}\", y={:.2}\"", x_arcsec, y_arcsec);
+            println!("  Recovered: RA={:.4}°, Dec={:.4}°", recovered_ra.to_degrees(), recovered_dec.to_degrees());
+            println!("  Error: RA={:.4}\", Dec={:.4}\"", ra_error_arcsec, dec_error_arcsec);
+            
+            assert!(ra_error_arcsec.abs() < 0.1, "RA round-trip error too large: {}", ra_error_arcsec);
+            assert!(dec_error_arcsec.abs() < 0.1, "Dec round-trip error too large: {}", dec_error_arcsec);
+        }
+    }
+    
+    /// Test that projection of center gives (0, 0)
+    #[test]
+    fn test_center_projection() {
+        let optical_ra_rad = 210.0_f64.to_radians();
+        let optical_dec_rad = 54.0_f64.to_radians();
+        
+        let (x, y) = get_star_x_y(
+            optical_ra_rad, optical_dec_rad,
+            optical_ra_rad, optical_dec_rad
+        );
+        
+        println!("Center projection: x={}, y={}", x, y);
+        assert!(x.abs() < 1e-10, "Center x should be 0, got {}", x);
+        assert!(y.abs() < 1e-10, "Center y should be 0, got {}", y);
+    }
+}

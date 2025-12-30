@@ -2,12 +2,14 @@ use crate::coordinate::*;
 use crate::parse_catalog::*;
 use crate::solver::*;
 use crate::star_quads::*;
+use rayon::prelude::*;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const MATCHED_TOLERANCE: f64 = 0.00085;
 
 /// Maximum number of spiral search iterations before giving up
-const MAX_SPIRAL_ITERATIONS: usize = 100;
+const MAX_SPIRAL_ITERATIONS: usize = 250;
 
 /// Minimum number of matched quads required for a valid solution
 const MIN_MATCHED_QUADS: usize = 3;
@@ -418,6 +420,30 @@ struct MatchAttemptResult<'a> {
     catalog_stars_xy: Vec<(f64, f64)>,
 }
 
+/// Creates a hash key from the first few normalized distances for quick lookup.
+/// Uses a bucket size based on the tolerance to find potential matches.
+#[inline]
+fn quad_hash_key(distances: &[f64; 6], bucket_size: f64) -> (i32, i32, i32) {
+    // Use distances[1], [2], [3] as keys (distances[0] is always 1.0)
+    (
+        (distances[1] / bucket_size).floor() as i32,
+        (distances[2] / bucket_size).floor() as i32,
+        (distances[3] / bucket_size).floor() as i32,
+    )
+}
+
+/// Builds a spatial hash index for catalog quads for fast matching.
+fn build_quad_index(quads: &[StarQuad], bucket_size: f64) -> std::collections::HashMap<(i32, i32, i32), Vec<usize>> {
+    let mut index: std::collections::HashMap<(i32, i32, i32), Vec<usize>> = std::collections::HashMap::new();
+    
+    for (idx, quad) in quads.iter().enumerate() {
+        let key = quad_hash_key(&quad.normalized_distances, bucket_size);
+        index.entry(key).or_default().push(idx);
+    }
+    
+    index
+}
+
 /// Attempts to match image quads against catalog quads at a specific sky position.
 /// 
 /// # Arguments
@@ -471,10 +497,14 @@ fn try_match_at_position<'a>(
         println!("  Generated {} catalog quads.", star_quad_from_cat.len());
     }
     
-    // Match quads between image and catalog
+    // Build spatial hash index for fast matching
+    // Use bucket size slightly smaller than tolerance to ensure we check nearby buckets
+    let bucket_size = MATCHED_TOLERANCE * 0.5;
+    let catalog_index = build_quad_index(&star_quad_from_cat, bucket_size);
+    
+    // Match quads between image and catalog using hash index
     // Each image quad should only match one catalog quad (best match)
     // and each catalog quad should only be used once
-    // Also avoid duplicate image quads (same barycenter)
     let mut matched_quads: Vec<(&StarQuad, StarQuad)> = Vec::new();
     let mut used_catalog_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let mut used_image_barycenters: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
@@ -493,22 +523,38 @@ fn try_match_at_position<'a>(
         
         let mut best_match: Option<(usize, &StarQuad, f64)> = None;
         
-        for (cat_idx, quad_cat) in star_quad_from_cat.iter().enumerate() {
-            // Skip if this catalog quad is already matched
-            if used_catalog_indices.contains(&cat_idx) {
-                continue;
-            }
-            
-            if quad.compare(quad_cat, MATCHED_TOLERANCE) {
-                // Calculate match quality (sum of squared differences in normalized distances)
-                let match_quality: f64 = quad.normalized_distances
-                    .iter()
-                    .zip(quad_cat.normalized_distances.iter())
-                    .map(|(d1, d2)| (d1 - d2).powi(2))
-                    .sum();
-                
-                if best_match.is_none() || match_quality < best_match.unwrap().2 {
-                    best_match = Some((cat_idx, quad_cat, match_quality));
+        // Get the base bucket key for this image quad
+        let base_key = quad_hash_key(&quad.normalized_distances, bucket_size);
+        
+        // Check neighboring buckets (3x3x3 = 27 buckets) to handle boundary cases
+        for di in -1..=1 {
+            for dj in -1..=1 {
+                for dk in -1..=1 {
+                    let neighbor_key = (base_key.0 + di, base_key.1 + dj, base_key.2 + dk);
+                    
+                    if let Some(candidates) = catalog_index.get(&neighbor_key) {
+                        for &cat_idx in candidates {
+                            // Skip if this catalog quad is already matched
+                            if used_catalog_indices.contains(&cat_idx) {
+                                continue;
+                            }
+                            
+                            let quad_cat = &star_quad_from_cat[cat_idx];
+                            
+                            if quad.compare(quad_cat, MATCHED_TOLERANCE) {
+                                // Calculate match quality (sum of squared differences)
+                                let match_quality: f64 = quad.normalized_distances
+                                    .iter()
+                                    .zip(quad_cat.normalized_distances.iter())
+                                    .map(|(d1, d2)| (d1 - d2).powi(2))
+                                    .sum();
+                                
+                                if best_match.is_none() || match_quality < best_match.unwrap().2 {
+                                    best_match = Some((cat_idx, quad_cat, match_quality));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -610,86 +656,114 @@ pub fn solve_plate_with_options(
     // Generate spiral search pattern
     let spiral_offsets = generate_spiral_offsets(max_spiral_iterations.max(1));
     
-    // Variables to store the best match result
+    // Pre-compute all search positions
+    let dec_rad = initial_dec_deg.to_radians();
+    let ra_scale = if dec_rad.cos().abs() > 0.001 { 1.0 / dec_rad.cos() } else { 1.0 };
+    
+    let search_positions: Vec<(usize, f64, f64)> = spiral_offsets
+        .iter()
+        .enumerate()
+        .map(|(iteration, (offset_x, offset_y))| {
+            let search_ra = initial_ra_deg + (*offset_x as f64) * fov_x_deg * ra_scale;
+            let search_dec = (initial_dec_deg + (*offset_y as f64) * fov_y_deg).clamp(-90.0, 90.0);
+            let search_ra = ((search_ra % 360.0) + 360.0) % 360.0;
+            (iteration, search_ra, search_dec)
+        })
+        .collect();
+    
+    // Flag to signal early termination when solution is found
+    let solution_found = AtomicBool::new(false);
+    
+    // Process in parallel batches - each batch fetches and matches simultaneously
+    const BATCH_SIZE: usize = 8; // Process 8 positions in parallel
+    
     let mut best_matched_quads: Vec<(StarQuad, StarQuad)> = Vec::new();
     let mut best_search_ra_deg = initial_ra_deg;
     let mut best_search_dec_deg = initial_dec_deg;
     let mut best_catalog_stars_xy: Vec<(f64, f64)> = Vec::new();
     let mut solution_iteration: usize = 0;
     
-    // Perform spiral search
-    for (iteration, (offset_x, offset_y)) in spiral_offsets.iter().enumerate() {
-        // Calculate the search position
-        // Account for RA scaling with declination (cos(dec) factor)
-        let dec_rad = initial_dec_deg.to_radians();
-        let ra_scale = if dec_rad.cos().abs() > 0.001 { 
-            1.0 / dec_rad.cos() 
-        } else { 
-            1.0 
-        };
-        
-        let search_ra_deg = initial_ra_deg + (*offset_x as f64) * fov_x_deg * ra_scale;
-        let search_dec_deg = initial_dec_deg + (*offset_y as f64) * fov_y_deg;
-        
-        // Clamp declination to valid range
-        let search_dec_deg = search_dec_deg.clamp(-90.0, 90.0);
-        // Normalize RA to 0-360 range
-        let search_ra_deg = ((search_ra_deg % 360.0) + 360.0) % 360.0;
-        
-        if verbose {
-            if iteration == 0 {
-                println!("Attempting match at initial position...");
-            } else {
-                println!("Spiral search iteration {}: offset ({}, {}), RA={:.4}°, Dec={:.4}°", 
-                         iteration, offset_x, offset_y, search_ra_deg, search_dec_deg);
-            }
-        }
-        
-        // Try to match at this position
-        let match_result = try_match_at_position(
-            &image_analysis.star_quads,
-            search_ra_deg,
-            search_dec_deg,
-            image_fov,
-            max_stars,
-            verbose,
-        )?;
-        
-        let matched_count = match_result.matched_quads.len();
-        
-        if verbose {
-            println!("  Found {} matches at this position.", matched_count);
-        }
-        
-        // Check if we found enough matches
-        if matched_count >= MIN_MATCHED_QUADS {
-            if verbose {
-                println!("Found {} matches (>= {}), proceeding with solution.", 
-                         matched_count, MIN_MATCHED_QUADS);
-            }
-            
-            // Convert to owned quads for storage
-            best_matched_quads = match_result.matched_quads
-                .into_iter()
-                .map(|(img, cat)| (img.clone(), cat))
-                .collect();
-            best_search_ra_deg = match_result.search_coord_ra_deg;
-            best_search_dec_deg = match_result.search_coord_dec_deg;
-            best_catalog_stars_xy = match_result.catalog_stars_xy;
-            solution_iteration = iteration;
+    for batch in search_positions.chunks(BATCH_SIZE) {
+        // Check if we already found a solution
+        if solution_found.load(Ordering::Relaxed) {
             break;
         }
         
-        // Keep track of best result so far (even if below threshold)
-        if matched_count > best_matched_quads.len() {
-            best_matched_quads = match_result.matched_quads
-                .into_iter()
-                .map(|(img, cat)| (img.clone(), cat))
-                .collect();
-            best_search_ra_deg = match_result.search_coord_ra_deg;
-            best_search_dec_deg = match_result.search_coord_dec_deg;
-            best_catalog_stars_xy = match_result.catalog_stars_xy;
-            solution_iteration = iteration;
+        // Process batch in parallel
+        let batch_results: Vec<_> = batch
+            .par_iter()
+            .filter_map(|(iteration, search_ra_deg, search_dec_deg)| {
+                // Skip if solution already found
+                if solution_found.load(Ordering::Relaxed) {
+                    return None;
+                }
+                
+                // Try to match at this position (includes network fetch)
+                match try_match_at_position(
+                    &image_analysis.star_quads,
+                    *search_ra_deg,
+                    *search_dec_deg,
+                    image_fov,
+                    max_stars,
+                    false, // Disable verbose in parallel
+                ) {
+                    Ok(result) => {
+                        let matched_count = result.matched_quads.len();
+                        
+                        // Signal if we found enough matches
+                        if matched_count >= MIN_MATCHED_QUADS {
+                            solution_found.store(true, Ordering::Relaxed);
+                        }
+                        
+                        Some((*iteration, result))
+                    }
+                    Err(_) => None,
+                }
+            })
+            .collect();
+        
+        // Process results in order (prefer earlier spiral positions)
+        for (iteration, match_result) in batch_results {
+            let matched_count = match_result.matched_quads.len();
+            
+            if verbose {
+                println!("  Position {} (RA={:.4}°, Dec={:.4}°): {} matches", 
+                         iteration, match_result.search_coord_ra_deg, 
+                         match_result.search_coord_dec_deg, matched_count);
+            }
+            
+            // Check if this is a good solution and better than what we have
+            if matched_count >= MIN_MATCHED_QUADS && 
+               (best_matched_quads.len() < MIN_MATCHED_QUADS || iteration < solution_iteration) {
+                if verbose {
+                    println!("Found {} matches (>= {}), proceeding with solution.", 
+                             matched_count, MIN_MATCHED_QUADS);
+                }
+                
+                best_matched_quads = match_result.matched_quads
+                    .into_iter()
+                    .map(|(img, cat)| (img.clone(), cat))
+                    .collect();
+                best_search_ra_deg = match_result.search_coord_ra_deg;
+                best_search_dec_deg = match_result.search_coord_dec_deg;
+                best_catalog_stars_xy = match_result.catalog_stars_xy;
+                solution_iteration = iteration;
+            } else if matched_count > best_matched_quads.len() {
+                // Keep track of best result so far
+                best_matched_quads = match_result.matched_quads
+                    .into_iter()
+                    .map(|(img, cat)| (img.clone(), cat))
+                    .collect();
+                best_search_ra_deg = match_result.search_coord_ra_deg;
+                best_search_dec_deg = match_result.search_coord_dec_deg;
+                best_catalog_stars_xy = match_result.catalog_stars_xy;
+                solution_iteration = iteration;
+            }
+        }
+        
+        // Stop if we found a solution
+        if best_matched_quads.len() >= MIN_MATCHED_QUADS {
+            break;
         }
     }
     

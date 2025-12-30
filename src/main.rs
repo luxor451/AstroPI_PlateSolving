@@ -168,8 +168,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Define the initial coordinate estimate
     let initial_coord = CoordinateEquatorial::new(
-        RaHoursMinutesSeconds::new(14, 15, 21.4),
-        Arcdegrees::new(54, 1, 14.40),
+        RaHoursMinutesSeconds::new(13, 15, 21.4),
+        Arcdegrees::new(45, 1, 14.40),
     );
 
     // Path to the DNG file to analyze

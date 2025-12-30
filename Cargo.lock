@@ -1609,6 +1609,7 @@ dependencies = [
  "nalgebra 0.33.2",
  "plotters",
  "rawloader",
+ "rayon",
  "reqwest",
  "serde",
  "serde_json",

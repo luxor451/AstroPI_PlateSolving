@@ -100,15 +100,37 @@ impl StarQuad {
     /// # Returns
     ///
     /// `true` if at least 5 out of 6 normalized distances match within tolerance.
+    #[inline]
     pub fn compare(&self, other: &StarQuad, tolerance: f64) -> bool {
-        let matches = self
-            .normalized_distances
-            .iter()
-            .zip(other.normalized_distances.iter())
-            .filter(|(d1, d2)| (*d1 - *d2).abs() <= tolerance)
-            .count();
-
-        matches >= 5
+        // Early exit: if we find more than 1 mismatch, we can't reach 5 matches
+        let mut mismatches = 0u8;
+        
+        // Unrolled loop for 6 fixed comparisons - faster than iterator
+        if (self.normalized_distances[0] - other.normalized_distances[0]).abs() > tolerance {
+            mismatches += 1;
+        }
+        if (self.normalized_distances[1] - other.normalized_distances[1]).abs() > tolerance {
+            mismatches += 1;
+            if mismatches > 1 { return false; }
+        }
+        if (self.normalized_distances[2] - other.normalized_distances[2]).abs() > tolerance {
+            mismatches += 1;
+            if mismatches > 1 { return false; }
+        }
+        if (self.normalized_distances[3] - other.normalized_distances[3]).abs() > tolerance {
+            mismatches += 1;
+            if mismatches > 1 { return false; }
+        }
+        if (self.normalized_distances[4] - other.normalized_distances[4]).abs() > tolerance {
+            mismatches += 1;
+            if mismatches > 1 { return false; }
+        }
+        if (self.normalized_distances[5] - other.normalized_distances[5]).abs() > tolerance {
+            mismatches += 1;
+            if mismatches > 1 { return false; }
+        }
+        
+        true
     }
 }
 
@@ -136,18 +158,48 @@ impl StarGraph {
             };
         }
 
-        let distance_matrix = calculate_distance_matrix(stars);
-        let mut adj = vec![Vec::new(); n];
+        const K: usize = 3; // Number of nearest neighbors
+        let mut adj = vec![Vec::with_capacity(K); n];
 
+        // For each star, find its K nearest neighbors
+        // This is still O(n²) but avoids storing the full matrix and uses early exit
         for i in 0..n {
-            let neighbors = distance_matrix[i]
-                .iter()
-                .enumerate()
-                .sorted_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(idx, _)| idx)
-                .take(3)
-                .collect::<Vec<usize>>();
-            adj[i] = neighbors;
+            let star_i = &stars[i];
+            
+            // Keep track of K smallest distances with their indices
+            // Using a simple array since K is small (3)
+            let mut nearest: [(f64, usize); K] = [(f64::MAX, 0); K];
+            
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                
+                // Calculate distance squared (avoid sqrt for comparison)
+                let dx = star_i.0 - stars[j].0;
+                let dy = star_i.1 - stars[j].1;
+                let dist_sq = dx * dx + dy * dy;
+                
+                // Check if this is closer than the farthest of our K nearest
+                if dist_sq < nearest[K - 1].0 {
+                    // Insert in sorted position
+                    nearest[K - 1] = (dist_sq, j);
+                    // Bubble sort the new element into place
+                    for k in (1..K).rev() {
+                        if nearest[k].0 < nearest[k - 1].0 {
+                            nearest.swap(k, k - 1);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Extract neighbor indices
+            adj[i] = nearest.iter()
+                .filter(|(d, _)| *d < f64::MAX)
+                .map(|(_, idx)| *idx)
+                .collect();
         }
 
         StarGraph {

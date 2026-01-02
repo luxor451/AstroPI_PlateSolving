@@ -1,3 +1,4 @@
+
 use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_hollow_circle_mut, draw_line_segment_mut};
 use plotters::prelude::*;
@@ -8,6 +9,7 @@ use crate::star_quads::*;
 
 /// Options for rendering DNG images
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub enum DngRenderMode {
     /// Histogram stretch with percentile clipping (default: 1% low, 99.5% high)
     Stretched { low_percentile: f64, high_percentile: f64 },
@@ -104,13 +106,13 @@ fn load_dng_as_rgb(dng_path: &Path, mode: DngRenderMode) -> Result<RgbImage, Box
 
     Ok(img)
 }
-
+#[allow(dead_code)]
 /// Returns the dimensions (width, height) of a DNG image after debayering.
 pub fn get_dng_dimensions(dng_path: &Path) -> Result<(usize, usize), Box<dyn Error>> {
     let raw_image = rawloader::decode_file(dng_path)?;
     Ok((raw_image.width / 2, raw_image.height / 2))
 }
-
+#[allow(dead_code)]
 pub fn plot_histogram_to_png(
     bins_data: &Vec<(&u16, &u32)>,
     output_path: &str,
@@ -159,7 +161,7 @@ pub fn plot_histogram_to_png(
     // println!("Histogram saved to {}", output_path);
     Ok(())
 }
-
+#[allow(dead_code)]
 pub fn save_pixel_matrix_to_png(
     matrix: &Vec<Vec<u16>>,
     output_path: &str,
@@ -228,7 +230,7 @@ pub fn save_pixel_matrix_to_png(
     // println!("PNG image saved to {}", output_path);
     Ok(())
 }
-
+#[allow(dead_code)]
 /// Annotates an existing image file with star positions and quad connections.
 /// 
 /// Opens an existing PNG file and overlays red circles at each star position
@@ -289,7 +291,7 @@ pub fn annotate_existing_image<P: AsRef<Path>, Q: AsRef<Path>>(
     img_rgb.save(&output_path)?;
     Ok(())
 }
-
+#[allow(dead_code)]
 /// Reconstructs a grayscale PNG from your centered pixels, then overlays
 /// red circles at each `(x,y)` barycenter, and re­saves it.
 pub fn annotate_stars_on_image<P: AsRef<Path>>(
@@ -361,7 +363,7 @@ pub fn annotate_stars_on_image<P: AsRef<Path>>(
     Ok(())
 }
 
-
+#[allow(dead_code)]
 /// Annotates a DNG image directly with star positions (red circles only, no quads).
 /// 
 /// Loads the DNG file with linear scaling and overlays red circles at star positions.
@@ -399,7 +401,7 @@ pub fn annotate_dng_image<P: AsRef<Path>, Q: AsRef<Path>>(
     img_rgb.save(output_path.as_ref())?;
     Ok(())
 }
-
+#[allow(dead_code)]
 /// Draws stars and quads on a black background.
 ///
 /// # Arguments
@@ -458,7 +460,7 @@ pub fn draw_stars_on_black<Q: AsRef<Path>>(
     img_rgb.save(output_path.as_ref())?;
     Ok(())
 }
-
+#[allow(dead_code)]
 /// Computes histogram bins from a DNG file.
 ///
 /// Returns a HashMap where keys are bin starts (multiples of bin_size) and values are counts.

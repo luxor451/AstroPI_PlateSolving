@@ -464,31 +464,6 @@ pub fn distance_between_stars(star1: &StarPosXY, star2: &StarPosXY) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
-/// Computes the pairwise distance matrix for a set of star positions.
-///
-/// # Arguments
-///
-/// * `barycenters` - Slice of star positions.
-///
-/// # Returns
-///
-/// A 2D matrix where `matrix[i][j]` is the distance from star i to star j.
-/// Diagonal elements are set to `f64::MAX`.
-pub fn calculate_distance_matrix(barycenters: &[(f64, f64)]) -> Vec<Vec<f64>> {
-    let n = barycenters.len();
-    let mut distance_matrix = vec![vec![0.0; n]; n];
-
-    for i in 0..n {
-        for j in 0..n {
-            if i != j {
-                distance_matrix[i][j] = distance_between_stars(&barycenters[i], &barycenters[j]);
-            } else {
-                distance_matrix[i][j] = std::f64::MAX;
-            }
-        }
-    }
-    distance_matrix
-}
 
 /// Generates all possible star quads from a set of stars using graph-based neighbor search.
 ///

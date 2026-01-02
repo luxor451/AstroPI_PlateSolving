@@ -1,5 +1,6 @@
 use std::path::Path;
 
+mod consts;
 mod coordinate;
 mod parse_catalog;
 mod printing;

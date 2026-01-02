@@ -1,3 +1,4 @@
+use crate::consts::*;
 use crate::coordinate::*;
 use crate::parse_catalog::*;
 use crate::solver::*;
@@ -7,23 +8,6 @@ use rayon::prelude::*;
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-const MATCHED_TOLERANCE: f64 = 0.001;
-
-/// Maximum number of spiral search iterations before giving up
-const MAX_SPIRAL_ITERATIONS: usize = 250;
-
-/// Minimum number of matched quads required for a valid solution
-const MIN_MATCHED_QUADS: usize = 3;
-
-/// Maximum iterations for star matching refinement
-const MAX_STAR_MATCH_ITERATIONS: usize = 10;
-
-/// Initial tolerance for star matching in arcseconds
-const INITIAL_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 60.0;
-
-/// Minimum tolerance for star matching in arcseconds
-const MIN_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 5.0;
 
 /// Convert CR3 file to DNG using dnglab
 pub fn convert_cr3_to_dng(cr3_path: &Path, dng_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -652,7 +636,7 @@ pub fn solve_plate_with_options(
     debug!("Found {} star barycenters in the image.", image_analysis.star_barycenters.len());
 
     // Calculate field of view in arcseconds
-    let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGHT;
+    let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
     let image_fov_x_arcsec = pixel_resolution * image_analysis.width as f64;
     let image_fov_y_arcsec = pixel_resolution * image_analysis.height as f64;
     let image_fov = image_fov_x_arcsec.max(image_fov_y_arcsec);

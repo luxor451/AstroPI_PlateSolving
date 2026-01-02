@@ -1,14 +1,9 @@
+use crate::consts::*;
 use itertools::Itertools;
 use rawloader::{RawImageData, decode_file};
 use std::collections::VecDeque;
 use std::fmt;
 use std::path::Path;
-
-pub const STAR_THREESHOLD: f32 = 0.15;
-pub const PIXEL_SIZE_MICRON: f64 = 6.0;
-pub const TELESCOPE_FOCAL_LENGHT: f64 = 1200.0;
-
-const BITDEPTH: u16 = 14;
 
 pub type StarPosXY = (f64, f64);
 
@@ -349,7 +344,7 @@ pub fn calculate_star_barycenters(
         return Vec::new();
     }
 
-    let star_threshold = ((2.0_f32.powi(BITDEPTH as i32) - 1.0) * STAR_THREESHOLD) as u16;
+    let star_threshold = ((2.0_f32.powi(BITDEPTH as i32) - 1.0) * STAR_THRESHOLD) as u16;
     
     let cx = (width / 2) as i32;
     let cy = (height / 2) as i32;

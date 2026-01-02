@@ -428,6 +428,7 @@ mod projection_tests {
 
 #[cfg(test)]
 mod printing_tests {
+    use crate::consts::*;
     use crate::coordinate::*;
     use crate::parse_catalog::*;
     use crate::platesolve::{analyze_image, convert_cr3_to_dng, get_star_x_y};
@@ -545,7 +546,7 @@ mod printing_tests {
             Arcdegrees::new(54, 24, 5.0),
         );
 
-        let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGHT;
+        let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
         let image_fov = (pixel_resolution * width as f64).max(pixel_resolution * height as f64);
 
         let star_in_fov_result = get_stars_from_catalogue(

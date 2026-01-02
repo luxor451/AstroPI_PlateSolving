@@ -367,12 +367,14 @@ pub fn annotate_stars_on_image<P: AsRef<Path>>(
 /// Annotates a DNG image directly with star positions (red circles only, no quads).
 /// 
 /// Loads the DNG file with linear scaling and overlays red circles at star positions.
+/// Note: The DNG is debayered (2x2 averaging) so the output image is half the raw dimensions.
+/// Star positions should be in raw image centered coordinates - they will be scaled by 0.5.
 ///
 /// # Arguments
 ///
 /// * `dng_path` - Path to the DNG file to annotate
 /// * `output_path` - Path where the annotated image will be saved
-/// * `star_positions` - Star positions in centered coordinates (relative to image center)
+/// * `star_positions` - Star positions in centered coordinates (relative to raw image center)
 /// * `circle_radius` - Radius of circles to draw around stars
 pub fn annotate_dng_image<P: AsRef<Path>, Q: AsRef<Path>>(
     dng_path: P,
@@ -388,10 +390,15 @@ pub fn annotate_dng_image<P: AsRef<Path>, Q: AsRef<Path>>(
     let cy = height / 2;
 
     // Draw circles at star positions
+    // Note: Star positions are in raw image coordinates (before debayering).
+    // The debayered image is half the size, so we scale positions by 0.5.
     let red = Rgb([255, 0, 0]);
     for &(bx, by) in star_positions {
-        let center_x = bx.round() as i32 + cx;
-        let center_y = by.round() as i32 + cy;
+        // Scale from raw coordinates to debayered coordinates
+        let scaled_x = bx * 0.5;
+        let scaled_y = by * 0.5;
+        let center_x = scaled_x.round() as i32 + cx;
+        let center_y = scaled_y.round() as i32 + cy;
 
         if center_x >= 0 && center_x < width && center_y >= 0 && center_y < height {
             draw_hollow_circle_mut(&mut img_rgb, (center_x, center_y), circle_radius, red);

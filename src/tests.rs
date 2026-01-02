@@ -561,7 +561,9 @@ mod printing_tests {
         }
 
         let star_in_fov = star_in_fov_result.unwrap();
-        let catalog_stars: Vec<(f64, f64)> = star_in_fov
+        
+        // Get catalog star positions in arcseconds (from get_star_x_y)
+        let catalog_stars_arcsec: Vec<(f64, f64)> = star_in_fov
             .iter()
             .map(|s| {
                 get_star_x_y(
@@ -573,7 +575,15 @@ mod printing_tests {
             })
             .collect();
 
-        let catalog_quads = returns_all_star_quads(&catalog_stars, 2);
+        // Convert catalog stars from arcseconds to pixels for visualization
+        // pixel_position = arcsec_position / pixel_resolution
+        let catalog_stars_pixels: Vec<(f64, f64)> = catalog_stars_arcsec
+            .iter()
+            .map(|&(x_arcsec, y_arcsec)| (x_arcsec / pixel_resolution, y_arcsec / pixel_resolution))
+            .collect();
+
+        // Use arcsec coordinates for quad matching (same as main plate solving logic)
+        let catalog_quads = returns_all_star_quads(&catalog_stars_arcsec, 2);
 
         // Find matched quads
         let mut matched_quads_image: Vec<StarQuad> = Vec::new();
@@ -592,10 +602,11 @@ mod printing_tests {
         println!("  Found {} matched quads", matched_quads_image.len());
 
         // 4. Black background with catalog stars (red circles only)
+        // Use pixel coordinates for visualization
         let path4 = format!("{}/04_catalog_stars_black.png", TEST_OUTPUT_DIR);
-        if draw_stars_on_black(width, height, &path4, &catalog_stars, &[], 8).is_ok() {
+        if draw_stars_on_black(width, height, &path4, &catalog_stars_pixels, &[], 8).is_ok() {
             println!("✓ 04_catalog_stars_black.png - Catalog stars on black ({} stars)", 
-                     catalog_stars.len());
+                     catalog_stars_pixels.len());
         } else {
             println!("✗ 04: Failed to draw catalog stars");
         }
@@ -610,10 +621,31 @@ mod printing_tests {
         }
 
         // 6. Black background with catalog stars and matched quads
+        // Need to convert catalog quad star positions from arcsec to pixels for visualization
+        let matched_quads_catalog_pixels: Vec<StarQuad> = matched_quads_catalog
+            .iter()
+            .map(|quad| {
+                // Convert each star position from arcsec to pixels
+                let stars_pixels: [(f64, f64); 4] = [
+                    (quad.stars[0].0 / pixel_resolution, quad.stars[0].1 / pixel_resolution),
+                    (quad.stars[1].0 / pixel_resolution, quad.stars[1].1 / pixel_resolution),
+                    (quad.stars[2].0 / pixel_resolution, quad.stars[2].1 / pixel_resolution),
+                    (quad.stars[3].0 / pixel_resolution, quad.stars[3].1 / pixel_resolution),
+                ];
+                // Create a new quad with pixel coordinates
+                StarQuad {
+                    stars: stars_pixels,
+                    barycenter: (quad.barycenter.0 / pixel_resolution, quad.barycenter.1 / pixel_resolution),
+                    largest_distance: quad.largest_distance / pixel_resolution,
+                    normalized_distances: quad.normalized_distances,
+                }
+            })
+            .collect();
+        
         let path6 = format!("{}/06_catalog_stars_matched_quads.png", TEST_OUTPUT_DIR);
-        if draw_stars_on_black(width, height, &path6, &catalog_stars, &matched_quads_catalog, 8).is_ok() {
+        if draw_stars_on_black(width, height, &path6, &catalog_stars_pixels, &matched_quads_catalog_pixels, 8).is_ok() {
             println!("✓ 06_catalog_stars_matched_quads.png - Catalog stars with {} matched quads", 
-                     matched_quads_catalog.len());
+                     matched_quads_catalog_pixels.len());
         } else {
             println!("✗ 06: Failed to draw catalog stars with quads");
         }

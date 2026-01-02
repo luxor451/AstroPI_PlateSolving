@@ -189,6 +189,21 @@ pub struct PlateSolvingResult {
     pub is_mirrored: bool,
 }
 
+
+impl std::fmt::Display for PlateSolvingResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.coeffs_x.is_some() {
+            let solved_coord = CoordinateEquatorial::from_radians(self.optical_axis_ra, self.optical_axis_dec);
+            write!(
+                f,
+                "RA: {}\nDec: {}\nPosition angle: {:.2}°",
+                solved_coord.ra, solved_coord.dec, self.rotation_deg
+            )
+        } else {
+            write!(f, "Plate solving failed: not enough matches.")
+        }
+    }
+}
 /// Extracts star quads and pixel data from a DNG image file.
 ///
 /// # Arguments
@@ -619,8 +634,19 @@ pub fn solve_plate_with_options(
     initial_coord: &CoordinateEquatorial,
     max_spiral_iterations: usize,
 ) -> Result<PlateSolvingResult, Box<dyn std::error::Error>> {
+    // Check if we need to convert CR3 to DNG
+    let (working_path, _temp_dir) = if file_path.extension().map(|e| e.to_ascii_lowercase()) == Some("cr3".into()) {
+        // Create a temporary directory for the DNG file
+        let temp_dir = tempfile::tempdir()?;
+        let dng_path = temp_dir.path().join("converted.dng");
+        convert_cr3_to_dng(file_path, &dng_path)?;
+        (dng_path, Some(temp_dir))
+    } else {
+        (file_path.to_path_buf(), None)
+    };
+
     // Analyze the image
-    let image_analysis = analyze_image(file_path)?;
+    let image_analysis = analyze_image(&working_path)?;
 
     info!("Found {} star quads in the image.", image_analysis.star_quads.len());
     debug!("Found {} star barycenters in the image.", image_analysis.star_barycenters.len());

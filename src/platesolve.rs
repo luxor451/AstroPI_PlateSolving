@@ -27,7 +27,6 @@ const MIN_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 5.0;
 /// Result of extracting star quads from an image
 pub struct ImageAnalysisResult {
     pub star_quads: Vec<StarQuad>,
-    pub centered_pixels: Vec<(i32, i32, u16)>,
     pub star_barycenters: Vec<(f64, f64)>,
     pub width: usize,
     pub height: usize,
@@ -129,20 +128,8 @@ impl TransformCoefficients {
         angle
     }
     
-    /// Returns the CD matrix elements commonly used in FITS WCS headers.
-    /// CD1_1, CD1_2, CD2_1, CD2_2 in degrees per pixel.
-    pub fn cd_matrix(&self) -> (f64, f64, f64, f64) {
-        // Convert from arcsec/pixel to degrees/pixel
-        let arcsec_to_deg = 1.0 / 3600.0;
-        (
-            self.a1 * arcsec_to_deg,
-            self.b1 * arcsec_to_deg,
-            self.a2 * arcsec_to_deg,
-            self.b2 * arcsec_to_deg,
-        )
-    }
 }
-
+#[allow(warnings)]
 /// Result of plate solving
 pub struct PlateSolvingResult {
     pub matched_quads_count: usize,
@@ -198,7 +185,6 @@ pub fn analyze_image(
 
     Ok(ImageAnalysisResult {
         star_quads,
-        centered_pixels,
         star_barycenters,
         width,
         height,

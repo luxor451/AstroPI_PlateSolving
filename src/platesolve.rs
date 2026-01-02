@@ -5,6 +5,7 @@ use crate::star_quads::*;
 use log::{debug, info, trace};
 use rayon::prelude::*;
 use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const MATCHED_TOLERANCE: f64 = 0.001;
@@ -23,6 +24,42 @@ const INITIAL_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 60.0;
 
 /// Minimum tolerance for star matching in arcseconds
 const MIN_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 5.0;
+
+/// Convert CR3 file to DNG using dnglab
+pub fn convert_cr3_to_dng(cr3_path: &Path, dng_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if dnglab is available in PATH or common locations
+    let dnglab_paths = [
+        "dnglab",
+        "/usr/local/bin/dnglab",
+        "/home/dimitryd/Documents/Travail/DocheSoftware/AstroPI/dnglab/target/release/dnglab",
+    ];
+
+    let mut dnglab_cmd = None;
+    for path in &dnglab_paths {
+        if Command::new(path).arg("--version").output().is_ok() {
+            dnglab_cmd = Some(path.to_string());
+            break;
+        }
+    }
+
+    let dnglab = dnglab_cmd.ok_or("dnglab not found. Please install dnglab or add it to PATH.")?;
+
+    info!("Converting {} to DNG...", cr3_path.display());
+    
+    let output = Command::new(&dnglab)
+        .arg("convert")
+        .arg(cr3_path)
+        .arg(dng_path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("dnglab conversion failed: {}", stderr).into());
+    }
+
+    info!("Created {}", dng_path.display());
+    Ok(())
+}
 
 /// Result of extracting star quads from an image
 pub struct ImageAnalysisResult {

@@ -1,27 +1,60 @@
 #[cfg(test)]
 mod plate_solving_tests {
     use crate::coordinate::*;
-    use crate::platesolve::solve_plate;
+    use crate::platesolve::{convert_cr3_to_dng, solve_plate};
+    use std::fs;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const TEST_FILE_PATH: &str = "test.dng";
+    const CR3_FILE_PATH: &str = "test_img/IMG_8993.CR3";
     
     /// Maximum allowed difference in arcseconds between solutions from different starting points
     const CONVERGENCE_TOLERANCE_ARCSEC: f64 = 5.0;
     
     /// Maximum allowed difference in degrees for position angle between solutions
     const ORIENTATION_TOLERANCE_DEG: f64 = 1.0;
+    
+    // Counter for unique test file names
+    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    /// Helper to check if test file exists
-    fn test_file_exists() -> bool {
-        Path::new(TEST_FILE_PATH).exists()
+    /// Generate a unique DNG file path for each test
+    fn get_unique_dng_path() -> String {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        format!("test_{}.dng", counter)
+    }
+
+    /// Ensure DNG file exists (convert from CR3 if needed)
+    fn ensure_dng_exists(dng_path: &str) -> bool {
+        let dng = Path::new(dng_path);
+        if dng.exists() {
+            return true;
+        }
+        
+        let cr3_path = Path::new(CR3_FILE_PATH);
+        if !cr3_path.exists() {
+            println!("CR3 file '{}' not found, skipping test", CR3_FILE_PATH);
+            return false;
+        }
+        
+        match convert_cr3_to_dng(cr3_path, dng) {
+            Ok(()) => true,
+            Err(e) => {
+                println!("Failed to convert CR3 to DNG: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Clean up temporary DNG file
+    fn cleanup_dng(dng_path: &str) {
+        let _ = fs::remove_file(dng_path);
     }
 
     /// Test that plate solving works from the initial estimate
     #[test]
     fn test_solve_plate_basic() {
-        if !test_file_exists() {
-            println!("Test file '{}' not found, skipping test", TEST_FILE_PATH);
+        let dng_path = get_unique_dng_path();
+        if !ensure_dng_exists(&dng_path) {
             return;
         }
 
@@ -30,7 +63,7 @@ mod plate_solving_tests {
             Arcdegrees::new(54, 1, 14.40),
         );
 
-        let result = solve_plate(Path::new(TEST_FILE_PATH), &initial_coord);
+        let result = solve_plate(Path::new(&dng_path), &initial_coord);
         
         assert!(result.is_ok(), "Plate solving failed: {:?}", result.err());
         
@@ -44,13 +77,15 @@ mod plate_solving_tests {
         println!("Scale: {:.4} arcsec/pixel", solution.scale_arcsec_per_pixel);
         println!("Matched quads: {}", solution.matched_quads_count);
         println!("Spiral iterations: {}", solution.spiral_iterations);
+        
+        cleanup_dng(&dng_path);
     }
 
     /// Test that plate solving converges to the same solution from multiple starting positions
     #[test]
     fn test_convergence_from_multiple_angles() {
-        if !test_file_exists() {
-            println!("Test file '{}' not found, skipping test", TEST_FILE_PATH);
+        let dng_path = get_unique_dng_path();
+        if !ensure_dng_exists(&dng_path) {
             return;
         }
 
@@ -99,7 +134,7 @@ mod plate_solving_tests {
 
             print!("Testing from {} (RA={:.2}°, Dec={:.2}°)... ", name, ra_deg, dec_deg);
 
-            match solve_plate(Path::new(TEST_FILE_PATH), &initial_coord) {
+            match solve_plate(Path::new(&dng_path), &initial_coord) {
                 Ok(solution) if solution.coeffs_x.is_some() => {
                     let solved_ra = solution.optical_axis_ra.to_degrees();
                     let solved_dec = solution.optical_axis_dec.to_degrees();
@@ -170,13 +205,15 @@ mod plate_solving_tests {
         );
         
         println!("\n✓ All solutions converged within tolerance!");
+        
+        cleanup_dng(&dng_path);
     }
 
     /// Test that solving from a position far from the true solution still works
     #[test]
     fn test_solve_from_far_offset() {
-        if !test_file_exists() {
-            println!("Test file '{}' not found, skipping test", TEST_FILE_PATH);
+        let dng_path = get_unique_dng_path();
+        if !ensure_dng_exists(&dng_path) {
             return;
         }
 
@@ -189,7 +226,7 @@ mod plate_solving_tests {
         println!("=== Far Offset Test ===");
         println!("Starting position: RA=14h 30m, Dec=52°");
 
-        let result = solve_plate(Path::new(TEST_FILE_PATH), &initial_coord);
+        let result = solve_plate(Path::new(&dng_path), &initial_coord);
         
         assert!(result.is_ok(), "Plate solving failed: {:?}", result.err());
         
@@ -209,13 +246,15 @@ mod plate_solving_tests {
             // It's acceptable to not find a solution from very far away
             println!("No solution found from far offset (expected behavior)");
         }
+        
+        cleanup_dng(&dng_path);
     }
 
     /// Test position angle is consistent (approximately the same) across solutions
     #[test]
     fn test_position_angle_consistency() {
-        if !test_file_exists() {
-            println!("Test file '{}' not found, skipping test", TEST_FILE_PATH);
+        let dng_path = get_unique_dng_path();
+        if !ensure_dng_exists(&dng_path) {
             return;
         }
 
@@ -237,7 +276,7 @@ mod plate_solving_tests {
         println!("=== Position Angle Consistency Test ===");
 
         for (i, coord) in positions.iter().enumerate() {
-            if let Ok(solution) = solve_plate(Path::new(TEST_FILE_PATH), coord) {
+            if let Ok(solution) = solve_plate(Path::new(&dng_path), coord) {
                 if solution.coeffs_x.is_some() {
                     println!("Solution {}: PA = {:.2}°, Scale = {:.4} arcsec/px, Mirrored = {}",
                              i + 1, solution.rotation_deg, solution.scale_arcsec_per_pixel, 
@@ -270,6 +309,8 @@ mod plate_solving_tests {
         );
 
         println!("✓ Position angles and scales are consistent!");
+        
+        cleanup_dng(&dng_path);
     }
 }
 
@@ -389,31 +430,63 @@ mod projection_tests {
 mod printing_tests {
     use crate::coordinate::*;
     use crate::parse_catalog::*;
-    use crate::platesolve::{analyze_image, get_star_x_y};
+    use crate::platesolve::{analyze_image, convert_cr3_to_dng, get_star_x_y};
     use crate::printing::*;
     use crate::star_quads::*;
     use std::fs;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const TEST_FILE_PATH: &str = "test.dng";
+    const CR3_FILE_PATH: &str = "test_img/IMG_8993.CR3";
     const TEST_OUTPUT_DIR: &str = "test_output";
     const MATCHED_TOLERANCE: f64 = 0.001;
+    
+    // Counter for unique test file names
+    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(100);
+
+    /// Generate a unique DNG file path for each test
+    fn get_unique_dng_path() -> String {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        format!("test_{}.dng", counter)
+    }
 
     /// Ensure test output directory exists
     fn ensure_output_dir() {
         fs::create_dir_all(TEST_OUTPUT_DIR).expect("Failed to create test output directory");
     }
 
-    /// Helper to check if test file exists
-    fn test_file_exists() -> bool {
-        Path::new(TEST_FILE_PATH).exists()
+    /// Ensure DNG file exists (convert from CR3 if needed)
+    fn ensure_dng_exists(dng_path: &str) -> bool {
+        let dng = Path::new(dng_path);
+        if dng.exists() {
+            return true;
+        }
+        
+        let cr3_path = Path::new(CR3_FILE_PATH);
+        if !cr3_path.exists() {
+            println!("CR3 file '{}' not found, skipping test", CR3_FILE_PATH);
+            return false;
+        }
+        
+        match convert_cr3_to_dng(cr3_path, dng) {
+            Ok(()) => true,
+            Err(e) => {
+                println!("Failed to convert CR3 to DNG: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Clean up temporary DNG file
+    fn cleanup_dng(dng_path: &str) {
+        let _ = fs::remove_file(dng_path);
     }
 
     /// Generate all 6 visualization images
     #[test]
     fn test_generate_all_visualizations() {
-        if !test_file_exists() {
-            println!("Test file '{}' not found, skipping test", TEST_FILE_PATH);
+        let dng_path = get_unique_dng_path();
+        if !ensure_dng_exists(&dng_path) {
             return;
         }
         ensure_output_dir();
@@ -422,10 +495,11 @@ mod printing_tests {
         println!("Output directory: {}/", TEST_OUTPUT_DIR);
 
         // Analyze image first to get dimensions and star positions
-        let image_analysis = match analyze_image(Path::new(TEST_FILE_PATH)) {
+        let image_analysis = match analyze_image(Path::new(&dng_path)) {
             Ok(analysis) => analysis,
             Err(e) => {
                 println!("✗ Failed to analyze image: {}", e);
+                cleanup_dng(&dng_path);
                 return;
             }
         };
@@ -435,7 +509,7 @@ mod printing_tests {
 
         // 1. Stretched image with center marker
         let path1 = format!("{}/01_stretched_with_center.png", TEST_OUTPUT_DIR);
-        if let Err(e) = dng_to_png(Path::new(TEST_FILE_PATH), Path::new(&path1)) {
+        if let Err(e) = dng_to_png(Path::new(&dng_path), Path::new(&path1)) {
             println!("✗ 01: Failed - {}", e);
         } else {
             println!("✓ 01_stretched_with_center.png - Stretched image with center marker");
@@ -443,7 +517,7 @@ mod printing_tests {
 
         // 2. Histogram of the original image
         let path2 = format!("{}/02_histogram.png", TEST_OUTPUT_DIR);
-        match compute_dng_histogram(Path::new(TEST_FILE_PATH), 100) {
+        match compute_dng_histogram(Path::new(&dng_path), 100) {
             Ok(histogram) => {
                 let mut bins_data: Vec<(&u16, &u32)> = histogram.iter().collect();
                 bins_data.sort_by_key(|&(k, _)| *k);
@@ -458,7 +532,7 @@ mod printing_tests {
 
         // 3. Original (not stretched) image with red circles around detected stars
         let path3 = format!("{}/03_original_with_stars.png", TEST_OUTPUT_DIR);
-        if annotate_dng_image(TEST_FILE_PATH, &path3, &image_analysis.star_barycenters, 8).is_ok() {
+        if annotate_dng_image(&dng_path, &path3, &image_analysis.star_barycenters, 8).is_ok() {
             println!("✓ 03_original_with_stars.png - Original image with {} detected stars", 
                      image_analysis.star_barycenters.len());
         } else {
@@ -482,6 +556,7 @@ mod printing_tests {
 
         if star_in_fov_result.is_err() {
             println!("✗ Could not fetch catalog data (possibly no internet), skipping 4-6");
+            cleanup_dng(&dng_path);
             return;
         }
 
@@ -544,5 +619,8 @@ mod printing_tests {
         }
 
         println!("\n=== All 6 visualizations saved to {}/ ===", TEST_OUTPUT_DIR);
+        
+        // Clean up temporary DNG file
+        cleanup_dng(&dng_path);
     }
 }

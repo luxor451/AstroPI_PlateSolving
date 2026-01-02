@@ -1,5 +1,7 @@
 use nalgebra::{DMatrix, DVector};
 
+use crate::consts::*;
+
 /// Solves for transformation coefficients mapping image coordinates to reference coordinates.
 ///
 /// Uses SVD to solve the problem: `A*x = b`
@@ -32,7 +34,7 @@ pub fn solve_projection(
 
     // Solve Ax = b for x using SVD
     let svd = a.svd(true, true);
-    let x = svd.solve(&b, 1e-14).expect("Failed to solve for x");
+    let x = svd.solve(&b, SVD_TOLERANCE).expect("Failed to solve for x");
 
     return (x[0], x[1], x[2]);
 }

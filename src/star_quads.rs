@@ -135,7 +135,7 @@ pub struct StarGraph {
 }
 
 impl StarGraph {
-    /// Creates a new StarGraph connecting each star to its 3 nearest neighbors.
+    /// Creates a new StarGraph connecting each star to its K nearest neighbors.
     ///
     /// # Arguments
     ///
@@ -153,8 +153,7 @@ impl StarGraph {
             };
         }
 
-        const K: usize = 3; // Number of nearest neighbors
-        let mut adj = vec![Vec::with_capacity(K); n];
+        let mut adj = vec![Vec::with_capacity(STAR_GRAPH_K_NEIGHBORS); n];
 
         // For each star, find its K nearest neighbors
         // This is still O(n²) but avoids storing the full matrix and uses early exit
@@ -162,8 +161,8 @@ impl StarGraph {
             let star_i = &stars[i];
             
             // Keep track of K smallest distances with their indices
-            // Using a simple array since K is small (3)
-            let mut nearest: [(f64, usize); K] = [(f64::MAX, 0); K];
+            // Using a simple array since K is small
+            let mut nearest: [(f64, usize); STAR_GRAPH_K_NEIGHBORS] = [(f64::MAX, 0); STAR_GRAPH_K_NEIGHBORS];
             
             for j in 0..n {
                 if i == j {
@@ -176,11 +175,11 @@ impl StarGraph {
                 let dist_sq = dx * dx + dy * dy;
                 
                 // Check if this is closer than the farthest of our K nearest
-                if dist_sq < nearest[K - 1].0 {
+                if dist_sq < nearest[STAR_GRAPH_K_NEIGHBORS - 1].0 {
                     // Insert in sorted position
-                    nearest[K - 1] = (dist_sq, j);
+                    nearest[STAR_GRAPH_K_NEIGHBORS - 1] = (dist_sq, j);
                     // Bubble sort the new element into place
-                    for k in (1..K).rev() {
+                    for k in (1..STAR_GRAPH_K_NEIGHBORS).rev() {
                         if nearest[k].0 < nearest[k - 1].0 {
                             nearest.swap(k, k - 1);
                         } else {
@@ -432,7 +431,7 @@ pub fn calculate_star_barycenters(
             }
         }
 
-        if total_mass > 0.0 && star_pixels > 2 {
+        if total_mass > 0.0 && star_pixels > MIN_STAR_PIXELS {
             barycenters.push((
                 weighted_x_sum / total_mass,
                 weighted_y_sum / total_mass,

@@ -636,7 +636,7 @@ pub fn solve_plate_with_options(
     debug!("Found {} star barycenters in the image.", image_analysis.star_barycenters.len());
 
     // Calculate field of view in arcseconds
-    let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
+    let pixel_resolution: f64 = ARCSEC_PER_RADIAN * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
     let image_fov_x_arcsec = pixel_resolution * image_analysis.width as f64;
     let image_fov_y_arcsec = pixel_resolution * image_analysis.height as f64;
     let image_fov = image_fov_x_arcsec.max(image_fov_y_arcsec);
@@ -649,7 +649,7 @@ pub fn solve_plate_with_options(
              image_fov_x_arcsec, image_fov_y_arcsec, fov_x_deg, fov_y_deg);
 
     let nb_of_stars = image_analysis.star_barycenters.len();
-    let max_stars = nb_of_stars * 100000;
+    let max_stars = nb_of_stars * CATALOG_STAR_MULTIPLIER;
     
     // Get initial coordinates in degrees
     let (initial_ra_deg, initial_dec_deg) = initial_coord.to_degrees();
@@ -676,7 +676,6 @@ pub fn solve_plate_with_options(
     let solution_found = AtomicBool::new(false);
     
     // Process in parallel batches - each batch fetches and matches simultaneously
-    const BATCH_SIZE: usize = 8; // Process 8 positions in parallel
     
     let mut best_matched_quads: Vec<(StarQuad, StarQuad)> = Vec::new();
     let mut best_search_ra_deg = initial_ra_deg;
@@ -684,7 +683,7 @@ pub fn solve_plate_with_options(
     let mut best_catalog_stars_xy: Vec<(f64, f64)> = Vec::new();
     let mut solution_iteration: usize = 0;
     
-    for batch in search_positions.chunks(BATCH_SIZE) {
+    for batch in search_positions.chunks(SPIRAL_BATCH_SIZE) {
         // Check if we already found a solution
         if solution_found.load(Ordering::Relaxed) {
             break;
@@ -808,8 +807,8 @@ pub fn solve_plate_with_options(
             // Use current transformation to predict catalog positions for all image stars
             let mut new_matched_stars: Vec<((f64, f64), (f64, f64))> = Vec::new();
             
-            // Tolerance decreases more gradually: divide by 1.5 each iteration instead of 2
-            let tolerance = (INITIAL_STAR_MATCH_TOLERANCE_ARCSEC / (1.5_f64).powi(iteration as i32))
+            // Tolerance decreases more gradually each iteration
+            let tolerance = (INITIAL_STAR_MATCH_TOLERANCE_ARCSEC / STAR_MATCH_TOLERANCE_REDUCTION_FACTOR.powi(iteration as i32))
                 .max(MIN_STAR_MATCH_TOLERANCE_ARCSEC);
             
             for &(img_x, img_y) in &image_analysis.star_barycenters {
@@ -880,7 +879,7 @@ pub fn solve_plate_with_options(
             transform = new_transform;
             matched_stars = new_matched_stars;
             
-            if scale_change < 0.0001 && rotation_change < 0.0001 && iteration > 0 {
+            if scale_change < CONVERGENCE_THRESHOLD && rotation_change < CONVERGENCE_THRESHOLD && iteration > 0 {
                 debug!("Converged!");
                 break;
             }
@@ -933,9 +932,6 @@ pub fn solve_plate_with_options(
     let mut final_match_count = final_matched_count;
 
     if coeffs_x.is_some() {
-        const RE_CENTER_THRESHOLD_DEG: f64 = 0.5; // Re-center if more than 0.5° off
-        const MAX_RE_CENTER_ITERATIONS: usize = 3;
-        
         let offset_deg = ((refined_ra.to_degrees() - optical_ra_deg).powi(2) 
                         + (refined_dec.to_degrees() - optical_dec_deg).powi(2)).sqrt();
         
@@ -973,7 +969,7 @@ pub fn solve_plate_with_options(
                     // Iteratively refine by matching individual stars
                     for iteration in 0..MAX_STAR_MATCH_ITERATIONS {
                         let mut new_matched_stars: Vec<((f64, f64), (f64, f64))> = Vec::new();
-                        let tolerance = (INITIAL_STAR_MATCH_TOLERANCE_ARCSEC / (1.5_f64).powi(iteration as i32))
+                        let tolerance = (INITIAL_STAR_MATCH_TOLERANCE_ARCSEC / STAR_MATCH_TOLERANCE_REDUCTION_FACTOR.powi(iteration as i32))
                             .max(MIN_STAR_MATCH_TOLERANCE_ARCSEC);
                         
                         for &(img_x, img_y) in &image_analysis.star_barycenters {
@@ -1019,7 +1015,7 @@ pub fn solve_plate_with_options(
                         iter_transform = new_transform;
                         final_match_count = new_matched_stars.len();
                         
-                        if scale_change < 0.0001 && rotation_change < 0.0001 && iteration > 0 {
+                        if scale_change < CONVERGENCE_THRESHOLD && rotation_change < CONVERGENCE_THRESHOLD && iteration > 0 {
                             break;
                         }
                     }
@@ -1045,8 +1041,8 @@ pub fn solve_plate_with_options(
                     refined_ra = new_ra;
                     refined_dec = new_dec;
                     
-                    // Converged if position changed by less than 0.01°
-                    if delta_ra < 0.01 && delta_dec < 0.01 {
+                    // Converged if position changed by less than threshold
+                    if delta_ra < RE_CENTER_CONVERGENCE_DEG && delta_dec < RE_CENTER_CONVERGENCE_DEG {
                         debug!("Re-centering converged!");
                         break;
                     }

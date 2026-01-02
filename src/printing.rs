@@ -5,13 +5,14 @@ use plotters::prelude::*;
 use std::error::Error;
 use std::path::Path;
 
+use crate::consts::*;
 use crate::star_quads::*;
 
 /// Options for rendering DNG images
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 pub enum DngRenderMode {
-    /// Histogram stretch with percentile clipping (default: 1% low, 99.5% high)
+    /// Histogram stretch with percentile clipping (default from constants)
     Stretched { low_percentile: f64, high_percentile: f64 },
     /// Linear scaling (no stretch, just map raw range to 0-255)
     Linear,
@@ -21,7 +22,10 @@ pub enum DngRenderMode {
 
 impl Default for DngRenderMode {
     fn default() -> Self {
-        DngRenderMode::Stretched { low_percentile: 0.01, high_percentile: 0.995 }
+        DngRenderMode::Stretched { 
+            low_percentile: HISTOGRAM_STRETCH_LOW_PERCENTILE, 
+            high_percentile: HISTOGRAM_STRETCH_HIGH_PERCENTILE 
+        }
     }
 }
 
@@ -198,9 +202,9 @@ pub fn save_pixel_matrix_to_png(
         flat_data.extend_from_slice(row);
     }
 
-    // Stretch pixel values by a factor of 4 and clamp to u16::MAX.
+    // Stretch pixel values and clamp to u16::MAX.
     for pixel_value in flat_data.iter_mut() {
-        *pixel_value = (*pixel_value as u32 * 4).min(u16::MAX as u32) as u16;
+        *pixel_value = (*pixel_value as u32 * PIXEL_STRETCH_FACTOR).min(u16::MAX as u32) as u16;
     }
 
     // Create an ImageBuffer for Luma<u16> (16-bit grayscale).
@@ -512,11 +516,10 @@ pub fn dng_to_png_with_mode(
     // Draw a crosshair marker at the center of the image
     let center_x = img.width() / 2;
     let center_y = img.height() / 2;
-    let marker_size = 20u32;
     let marker_color = Rgb([255u8, 0u8, 0u8]); // Bright red marker
 
     // Draw horizontal line of the crosshair
-    for dx in 0..=marker_size {
+    for dx in 0..=CROSSHAIR_MARKER_SIZE {
         if center_x >= dx {
             img.put_pixel(center_x - dx, center_y, marker_color);
         }
@@ -526,7 +529,7 @@ pub fn dng_to_png_with_mode(
     }
 
     // Draw vertical line of the crosshair
-    for dy in 0..=marker_size {
+    for dy in 0..=CROSSHAIR_MARKER_SIZE {
         if center_y >= dy {
             img.put_pixel(center_x, center_y - dy, marker_color);
         }
@@ -536,11 +539,10 @@ pub fn dng_to_png_with_mode(
     }
 
     // Draw a small circle around the center for better visibility
-    let circle_radius = 10u32;
     for angle in 0..360 {
         let rad = (angle as f64).to_radians();
-        let cx = (center_x as f64 + circle_radius as f64 * rad.cos()).round() as u32;
-        let cy = (center_y as f64 + circle_radius as f64 * rad.sin()).round() as u32;
+        let cx = (center_x as f64 + CENTER_CIRCLE_RADIUS as f64 * rad.cos()).round() as u32;
+        let cy = (center_y as f64 + CENTER_CIRCLE_RADIUS as f64 * rad.sin()).round() as u32;
         if cx < img.width() && cy < img.height() {
             img.put_pixel(cx, cy, marker_color);
         }

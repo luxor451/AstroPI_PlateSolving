@@ -3,7 +3,7 @@ use crate::coordinate::*;
 use crate::parse_catalog::*;
 use crate::solver::*;
 use crate::star_quads::*;
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use rayon::prelude::*;
 use std::path::Path;
 use std::process::Command;
@@ -489,9 +489,13 @@ fn try_match_at_position<'a>(
             )
         })
         .collect();
+
+    // Cap n to avoid memory explosion with large catalogs
+    let n = (stars_in_fov.len() / image_quads.len() + 1).min(MAX_CATALOG_QUAD_HOPS);
+    info!("number of stars in fov: {}, number of image quads: {}, n : {}", stars_in_fov.len(), image_quads.len(), n);
     
     // Generate star quads from catalog
-    let star_quad_from_cat = returns_all_star_quads(&vec_star, 2);
+    let star_quad_from_cat = returns_all_star_quads(&vec_star, n);
     
     trace!("Generated {} catalog quads.", star_quad_from_cat.len());
     
@@ -729,6 +733,28 @@ pub fn solve_plate_with_options(
                      iteration, match_result.search_coord_ra_deg, 
                      match_result.search_coord_dec_deg, matched_count);
             
+            // Early scale validation: compute rough transformation and check scale
+            if matched_count >= MIN_MATCHED_QUADS {
+                let img_x: Vec<f64> = match_result.matched_quads.iter().map(|(q, _)| q.barycenter.0).collect();
+                let img_y: Vec<f64> = match_result.matched_quads.iter().map(|(q, _)| q.barycenter.1).collect();
+                let cat_x: Vec<f64> = match_result.matched_quads.iter().map(|(_, q)| q.barycenter.0).collect();
+                let cat_y: Vec<f64> = match_result.matched_quads.iter().map(|(_, q)| q.barycenter.1).collect();
+                
+                let test_coeffs_x = solve_projection(&cat_x, &img_x, &img_y);
+                let test_coeffs_y = solve_projection(&cat_y, &img_x, &img_y);
+                let test_transform = TransformCoefficients::new(test_coeffs_x, test_coeffs_y);
+                let scale = test_transform.scale();
+                
+                let scale_min = EXPECTED_PIXEL_SCALE * (1.0 - SCALE_TOLERANCE_FRACTION);
+                let scale_max = EXPECTED_PIXEL_SCALE * (1.0 + SCALE_TOLERANCE_FRACTION);
+                
+                if scale < scale_min || scale > scale_max {
+                    debug!("Rejecting position {}: scale {:.4} outside range [{:.4}, {:.4}]",
+                           iteration, scale, scale_min, scale_max);
+                    continue; // Skip this solution, keep searching
+                }
+            }
+            
             // Check if this is a good solution and better than what we have
             if matched_count >= MIN_MATCHED_QUADS && 
                (best_matched_quads.len() < MIN_MATCHED_QUADS || iteration < solution_iteration) {
@@ -799,6 +825,17 @@ pub fn solve_plate_with_options(
         debug!("Initial transformation from {} quad barycenters:", best_matched_quads.len());
         debug!("  Scale: {:.4} arcsec/pixel, Rotation: {:.4}°", 
                  transform.scale(), transform.rotation().to_degrees());
+        
+        // Validate scale - reject solutions with implausible scales
+        let scale = transform.scale();
+        let scale_min = EXPECTED_PIXEL_SCALE * (1.0 - SCALE_TOLERANCE_FRACTION);
+        let scale_max = EXPECTED_PIXEL_SCALE * (1.0 + SCALE_TOLERANCE_FRACTION);
+        
+        if scale < scale_min || scale > scale_max {
+            warn!("Rejecting solution: scale {:.4} arcsec/pixel is outside expected range [{:.4}, {:.4}]",
+                  scale, scale_min, scale_max);
+            (None, None, None, initial_ra_deg, initial_dec_deg, 0)
+        } else {
         
         // Step 2-5: Iteratively refine by matching individual stars
         let mut matched_stars: Vec<((f64, f64), (f64, f64))> = Vec::new(); // (image_pos, catalog_pos)
@@ -906,6 +943,7 @@ pub fn solve_plate_with_options(
         trace!("Image center Dec: {:.6}° ({:.6} rad)", center_dec.to_degrees(), center_dec);
 
         (Some(coeffs_x), Some(coeffs_y), Some(transform), best_search_ra_deg, best_search_dec_deg, final_match_count)
+        } // end of scale validation else block
     } else {
         info!("Not enough matches found to determine the transformation matrix.");
         debug!("Need at least {} matched quads, found {}.", MIN_MATCHED_QUADS, matched_count);
@@ -924,8 +962,9 @@ pub fn solve_plate_with_options(
         (initial_coord.ra.to_radians(), initial_coord.dec.to_radians())
     };
 
-    // Re-centering refinement: if the solved position is significantly different from the
-    // search position, re-project catalog stars from the solved position and refine
+    // Re-centering refinement: always refine the solution by re-projecting catalog stars
+    // from the solved position. This catches false positives that happen to be close to
+    // the initial search position.
     let mut final_coeffs_x = coeffs_x;
     let mut final_coeffs_y = coeffs_y;
     let mut final_transform = transform;
@@ -935,10 +974,9 @@ pub fn solve_plate_with_options(
         let offset_deg = ((refined_ra.to_degrees() - optical_ra_deg).powi(2) 
                         + (refined_dec.to_degrees() - optical_dec_deg).powi(2)).sqrt();
         
-        if offset_deg > RE_CENTER_THRESHOLD_DEG {
-            debug!("Re-centering: solved position is {:.2}° from search position", offset_deg);
-            
-            for re_iter in 0..MAX_RE_CENTER_ITERATIONS {
+        debug!("Re-centering: solved position is {:.2}° from search position", offset_deg);
+        
+        for re_iter in 0..MAX_RE_CENTER_ITERATIONS {
                 // Use the current solved position as the new projection center
                 let new_center_ra_deg = refined_ra.to_degrees();
                 let new_center_dec_deg = refined_dec.to_degrees();
@@ -1048,7 +1086,6 @@ pub fn solve_plate_with_options(
                     }
                 }
             }
-        }
     }
 
     // Extract orientation information from the final transform

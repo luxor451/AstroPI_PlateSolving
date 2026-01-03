@@ -5,10 +5,18 @@
 // =============================================================================
 
 /// Tolerance for matching star quads (normalized distance difference)
-pub const MATCHED_TOLERANCE: f64 = 0.001;
+/// Higher = more lenient matching (more matches but more false positives)
+/// Lower = stricter matching (fewer matches but more accurate)
+/// 0.001 is very strict, 0.005 is lenient
+pub const MATCHED_TOLERANCE: f64 = 0.002;
 
 /// Minimum number of matched quads required for a valid solution
-pub const MIN_MATCHED_QUADS: usize = 3;
+/// Higher = more confident but harder to solve
+/// Need enough to reject false positives through consensus
+pub const MIN_MATCHED_QUADS: usize = 10;
+
+/// Maximum graph hops for catalog quad generation (prevents memory explosion)
+pub const MAX_CATALOG_QUAD_HOPS: usize = 2;
 
 // =============================================================================
 // Spiral Search Constants
@@ -18,39 +26,39 @@ pub const MIN_MATCHED_QUADS: usize = 3;
 pub const MAX_SPIRAL_ITERATIONS: usize = 500;
 
 /// Number of positions to process in parallel during spiral search
-pub const SPIRAL_BATCH_SIZE: usize = 16;
+pub const SPIRAL_BATCH_SIZE: usize = 8;
 
 // =============================================================================
 // Star Matching Refinement Constants
 // =============================================================================
 
 /// Maximum iterations for star matching refinement
-pub const MAX_STAR_MATCH_ITERATIONS: usize = 10;
+pub const MAX_STAR_MATCH_ITERATIONS: usize = 15;
 
 /// Initial tolerance for star matching in arcseconds
-pub const INITIAL_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 60.0;
+/// Higher gives more initial matches to refine from
+pub const INITIAL_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 120.0;
 
 /// Minimum tolerance for star matching in arcseconds
-pub const MIN_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 5.0;
+pub const MIN_STAR_MATCH_TOLERANCE_ARCSEC: f64 = 3.0;
 
 /// Factor by which tolerance is reduced each iteration (tolerance /= factor^iteration)
-pub const STAR_MATCH_TOLERANCE_REDUCTION_FACTOR: f64 = 1.5;
+/// Lower = slower reduction, more gradual refinement
+pub const STAR_MATCH_TOLERANCE_REDUCTION_FACTOR: f64 = 1.3;
 
 /// Convergence threshold for scale/rotation changes (radians)
-pub const CONVERGENCE_THRESHOLD: f64 = 0.0001;
+/// Smaller = tighter convergence
+pub const CONVERGENCE_THRESHOLD: f64 = 0.00001;
 
 // =============================================================================
 // Re-centering Constants
 // =============================================================================
 
-/// Threshold in degrees to trigger re-centering refinement
-pub const RE_CENTER_THRESHOLD_DEG: f64 = 0.5;
-
 /// Maximum iterations for re-centering refinement
-pub const MAX_RE_CENTER_ITERATIONS: usize = 3;
+pub const MAX_RE_CENTER_ITERATIONS: usize = 15;
 
 /// Convergence threshold for position during re-centering (degrees)
-pub const RE_CENTER_CONVERGENCE_DEG: f64 = 0.01;
+pub const RE_CENTER_CONVERGENCE_DEG: f64 = 0.00001;
 
 // =============================================================================
 // Star Detection Constants
@@ -60,10 +68,11 @@ pub const RE_CENTER_CONVERGENCE_DEG: f64 = 0.01;
 pub const STAR_THRESHOLD: f32 = 0.15;
 
 /// Minimum number of connected pixels to consider a detection as a star
-pub const MIN_STAR_PIXELS: u32 = 2;
+pub const MIN_STAR_PIXELS: u32 = 5;
 
 /// Number of nearest neighbors for star graph construction
-pub const STAR_GRAPH_K_NEIGHBORS: usize = 3;
+/// Higher = more quads generated (better matching but more memory/time)
+pub const STAR_GRAPH_K_NEIGHBORS: usize = 6;
 
 // =============================================================================
 // Camera/Telescope Constants
@@ -73,7 +82,7 @@ pub const STAR_GRAPH_K_NEIGHBORS: usize = 3;
 pub const PIXEL_SIZE_MICRON: f64 = 6.0;
 
 /// Telescope focal length in millimeters
-pub const TELESCOPE_FOCAL_LENGTH: f64 = 1200.0;
+pub const TELESCOPE_FOCAL_LENGTH: f64 = 714.0;
 
 /// Camera bit depth
 pub const BITDEPTH: u16 = 14;
@@ -81,8 +90,21 @@ pub const BITDEPTH: u16 = 14;
 /// Conversion factor from focal length to pixel scale (arcsec/pixel = 206.265 * pixel_size_um / focal_length_mm)
 pub const ARCSEC_PER_RADIAN: f64 = 206.265;
 
+/// Expected pixel scale (arcsec/pixel) = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH
+/// Used to validate solutions - reject if scale is too far from expected
+/// Note: Actual scale from solving may differ slightly due to optical effects
+/// For 714mm f/l + 6μm pixels: 206.265 * 6.0 / 714 = 1.733 arcsec/pixel
+/// For 1200mm f/l + 6μm pixels: 206.265 * 6.0 / 1200 = 1.031 arcsec/pixel
+/// Using mid-point to support multiple optical setups
+pub const EXPECTED_PIXEL_SCALE: f64 = 1.4;
+
+/// Tolerance for pixel scale validation (fraction of expected scale)
+/// e.g., 0.5 means accept scales within ±50% of expected
+/// 1.4 * 0.5 = 0.7, so range is 0.7 to 2.1 arcsec/pixel (covers 714mm to 1200mm setups)
+pub const SCALE_TOLERANCE_FRACTION: f64 = 0.50;
+
 /// Multiplier for maximum stars to fetch from catalog (relative to detected stars)
-pub const CATALOG_STAR_MULTIPLIER: usize = 100000;
+pub const CATALOG_STAR_MULTIPLIER: usize = 2;
 
 // =============================================================================
 // HTTP Client Constants (VizieR Connection)
@@ -130,4 +152,4 @@ pub const CENTER_CIRCLE_RADIUS: u32 = 10;
 // =============================================================================
 
 /// SVD solver tolerance for least squares fitting
-pub const SVD_TOLERANCE: f64 = 1e-14;
+pub const SVD_TOLERANCE: f64 = 1e-16;

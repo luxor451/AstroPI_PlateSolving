@@ -2,61 +2,60 @@
 mod plate_solving_tests {
     use crate::coordinate::*;
     use crate::platesolve::{convert_cr3_to_dng, solve_plate};
-    use std::fs;
     use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::OnceLock;
 
-    const CR3_FILE_PATH: &str = "test_img/IMG_8993.CR3";
+    const CR3_FILE_PATH: &str = "test_img/M101.CR3";
+    
+    /// Shared DNG file path - created once and reused by all tests
+    const SHARED_DNG_PATH: &str = "test_shared.dng";
+    
+    /// OnceLock to ensure DNG is created only once across all tests
+    static DNG_INIT: OnceLock<bool> = OnceLock::new();
     
     /// Maximum allowed difference in arcseconds between solutions from different starting points
     const CONVERGENCE_TOLERANCE_ARCSEC: f64 = 5.0;
     
     /// Maximum allowed difference in degrees for position angle between solutions
     const ORIENTATION_TOLERANCE_DEG: f64 = 1.0;
-    
-    // Counter for unique test file names
-    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    /// Generate a unique DNG file path for each test
-    fn get_unique_dng_path() -> String {
-        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-        format!("test_{}.dng", counter)
-    }
-
-    /// Ensure DNG file exists (convert from CR3 if needed)
-    fn ensure_dng_exists(dng_path: &str) -> bool {
-        let dng = Path::new(dng_path);
-        if dng.exists() {
-            return true;
-        }
-        
-        let cr3_path = Path::new(CR3_FILE_PATH);
-        if !cr3_path.exists() {
-            println!("CR3 file '{}' not found, skipping test", CR3_FILE_PATH);
-            return false;
-        }
-        
-        match convert_cr3_to_dng(cr3_path, dng) {
-            Ok(()) => true,
-            Err(e) => {
-                println!("Failed to convert CR3 to DNG: {}", e);
-                false
+    /// Ensure the shared DNG file exists (thread-safe, creates only once)
+    fn get_test_dng_path() -> Option<&'static str> {
+        let success = DNG_INIT.get_or_init(|| {
+            let dng = Path::new(SHARED_DNG_PATH);
+            if dng.exists() {
+                return true;
             }
+            
+            let cr3_path = Path::new(CR3_FILE_PATH);
+            if !cr3_path.exists() {
+                println!("CR3 file '{}' not found, skipping test", CR3_FILE_PATH);
+                return false;
+            }
+            
+            match convert_cr3_to_dng(cr3_path, dng) {
+                Ok(()) => true,
+                Err(e) => {
+                    println!("Failed to convert CR3 to DNG: {}", e);
+                    false
+                }
+            }
+        });
+        
+        if *success {
+            Some(SHARED_DNG_PATH)
+        } else {
+            None
         }
-    }
-
-    /// Clean up temporary DNG file
-    fn cleanup_dng(dng_path: &str) {
-        let _ = fs::remove_file(dng_path);
     }
 
     /// Test that plate solving works from the initial estimate
     #[test]
     fn test_solve_plate_basic() {
-        let dng_path = get_unique_dng_path();
-        if !ensure_dng_exists(&dng_path) {
-            return;
-        }
+        let dng_path = match get_test_dng_path() {
+            Some(p) => p,
+            None => return,
+        };
 
         let initial_coord = CoordinateEquatorial::new(
             RaHoursMinutesSeconds::new(14, 15, 21.4),
@@ -77,17 +76,15 @@ mod plate_solving_tests {
         println!("Scale: {:.4} arcsec/pixel", solution.scale_arcsec_per_pixel);
         println!("Matched quads: {}", solution.matched_quads_count);
         println!("Spiral iterations: {}", solution.spiral_iterations);
-        
-        cleanup_dng(&dng_path);
     }
 
     /// Test that plate solving converges to the same solution from multiple starting positions
     #[test]
     fn test_convergence_from_multiple_angles() {
-        let dng_path = get_unique_dng_path();
-        if !ensure_dng_exists(&dng_path) {
-            return;
-        }
+        let dng_path = match get_test_dng_path() {
+            Some(p) => p,
+            None => return,
+        };
 
         // Define multiple starting positions around the expected solution
         // These offsets are in degrees from the base position
@@ -205,17 +202,15 @@ mod plate_solving_tests {
         );
         
         println!("\n✓ All solutions converged within tolerance!");
-        
-        cleanup_dng(&dng_path);
     }
 
     /// Test that solving from a position far from the true solution still works
     #[test]
     fn test_solve_from_far_offset() {
-        let dng_path = get_unique_dng_path();
-        if !ensure_dng_exists(&dng_path) {
-            return;
-        }
+        let dng_path = match get_test_dng_path() {
+            Some(p) => p,
+            None => return,
+        };
 
         // Start 3 degrees away from expected position (should require spiral search)
         let initial_coord = CoordinateEquatorial::new(
@@ -246,17 +241,15 @@ mod plate_solving_tests {
             // It's acceptable to not find a solution from very far away
             println!("No solution found from far offset (expected behavior)");
         }
-        
-        cleanup_dng(&dng_path);
     }
 
     /// Test position angle is consistent (approximately the same) across solutions
     #[test]
     fn test_position_angle_consistency() {
-        let dng_path = get_unique_dng_path();
-        if !ensure_dng_exists(&dng_path) {
-            return;
-        }
+        let dng_path = match get_test_dng_path() {
+            Some(p) => p,
+            None => return,
+        };
 
         // Solve from two different starting positions (both close enough to find solution)
         let positions = vec![
@@ -309,8 +302,6 @@ mod plate_solving_tests {
         );
 
         println!("✓ Position angles and scales are consistent!");
-        
-        cleanup_dng(&dng_path);
     }
 }
 
@@ -436,71 +427,69 @@ mod printing_tests {
     use crate::star_quads::*;
     use std::fs;
     use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::OnceLock;
 
-    const CR3_FILE_PATH: &str = "test_img/IMG_8993.CR3";
+    const CR3_FILE_PATH: &str = "test_img/M82.CR3";
     const TEST_OUTPUT_DIR: &str = "test_output";
-    const MATCHED_TOLERANCE: f64 = 0.001;
     
-    // Counter for unique test file names
-    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(100);
-
-    /// Generate a unique DNG file path for each test
-    fn get_unique_dng_path() -> String {
-        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-        format!("test_{}.dng", counter)
-    }
+    /// Shared DNG file path - created once and reused by all tests
+    const SHARED_DNG_PATH: &str = "test_shared.dng";
+    
+    /// OnceLock to ensure DNG is created only once across all tests
+    static DNG_INIT: OnceLock<bool> = OnceLock::new();
 
     /// Ensure test output directory exists
     fn ensure_output_dir() {
         fs::create_dir_all(TEST_OUTPUT_DIR).expect("Failed to create test output directory");
     }
 
-    /// Ensure DNG file exists (convert from CR3 if needed)
-    fn ensure_dng_exists(dng_path: &str) -> bool {
-        let dng = Path::new(dng_path);
-        if dng.exists() {
-            return true;
-        }
-        
-        let cr3_path = Path::new(CR3_FILE_PATH);
-        if !cr3_path.exists() {
-            println!("CR3 file '{}' not found, skipping test", CR3_FILE_PATH);
-            return false;
-        }
-        
-        match convert_cr3_to_dng(cr3_path, dng) {
-            Ok(()) => true,
-            Err(e) => {
-                println!("Failed to convert CR3 to DNG: {}", e);
-                false
+    /// Ensure the shared DNG file exists (thread-safe, creates only once)
+    fn get_test_dng_path() -> Option<&'static str> {
+        let success = DNG_INIT.get_or_init(|| {
+            let dng = Path::new(SHARED_DNG_PATH);
+            if dng.exists() {
+                return true;
             }
+            
+            let cr3_path = Path::new(CR3_FILE_PATH);
+            if !cr3_path.exists() {
+                println!("CR3 file '{}' not found, skipping test", CR3_FILE_PATH);
+                return false;
+            }
+            
+            match convert_cr3_to_dng(cr3_path, dng) {
+                Ok(()) => true,
+                Err(e) => {
+                    println!("Failed to convert CR3 to DNG: {}", e);
+                    false
+                }
+            }
+        });
+        
+        if *success {
+            Some(SHARED_DNG_PATH)
+        } else {
+            None
         }
-    }
-
-    /// Clean up temporary DNG file
-    fn cleanup_dng(dng_path: &str) {
-        let _ = fs::remove_file(dng_path);
     }
 
     /// Generate all 6 visualization images
     #[test]
     fn test_generate_all_visualizations() {
-        let dng_path = get_unique_dng_path();
-        if !ensure_dng_exists(&dng_path) {
-            return;
-        }
+        let dng_path = match get_test_dng_path() {
+            Some(p) => p,
+            None => return,
+        };
         ensure_output_dir();
 
         println!("\n=== Generating All Visualization Images ===");
         println!("Output directory: {}/", TEST_OUTPUT_DIR);
 
         // Analyze image first to get dimensions and star positions
-        let image_analysis = match analyze_image(Path::new(&dng_path)) {
+        let image_analysis = match analyze_image(Path::new(dng_path)) {
             Ok(analysis) => analysis,
             Err(e) => {
                 println!("✗ Failed to analyze image: {}", e);
-                cleanup_dng(&dng_path);
                 return;
             }
         };
@@ -510,7 +499,7 @@ mod printing_tests {
 
         // 1. Stretched image with center marker
         let path1 = format!("{}/01_stretched_with_center.png", TEST_OUTPUT_DIR);
-        if let Err(e) = dng_to_png(Path::new(&dng_path), Path::new(&path1)) {
+        if let Err(e) = dng_to_png(Path::new(dng_path), Path::new(&path1)) {
             println!("✗ 01: Failed - {}", e);
         } else {
             println!("✓ 01_stretched_with_center.png - Stretched image with center marker");
@@ -518,7 +507,7 @@ mod printing_tests {
 
         // 2. Histogram of the original image
         let path2 = format!("{}/02_histogram.png", TEST_OUTPUT_DIR);
-        match compute_dng_histogram(Path::new(&dng_path), 100) {
+        match compute_dng_histogram(Path::new(dng_path), 100) {
             Ok(histogram) => {
                 let mut bins_data: Vec<(&u16, &u32)> = histogram.iter().collect();
                 bins_data.sort_by_key(|&(k, _)| *k);
@@ -533,7 +522,7 @@ mod printing_tests {
 
         // 3. Original (not stretched) image with red circles around detected stars
         let path3 = format!("{}/03_original_with_stars.png", TEST_OUTPUT_DIR);
-        if annotate_dng_image(&dng_path, &path3, &image_analysis.star_barycenters, 8).is_ok() {
+        if annotate_dng_image(dng_path, &path3, &image_analysis.star_barycenters, 8).is_ok() {
             println!("✓ 03_original_with_stars.png - Original image with {} detected stars", 
                      image_analysis.star_barycenters.len());
         } else {
@@ -546,7 +535,7 @@ mod printing_tests {
             Arcdegrees::new(54, 24, 5.0),
         );
 
-        let pixel_resolution: f64 = 206.265 * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
+        let pixel_resolution: f64 = ARCSEC_PER_RADIAN * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
         let image_fov = (pixel_resolution * width as f64).max(pixel_resolution * height as f64);
 
         let star_in_fov_result = get_stars_from_catalogue(
@@ -557,7 +546,6 @@ mod printing_tests {
 
         if star_in_fov_result.is_err() {
             println!("✗ Could not fetch catalog data (possibly no internet), skipping 4-6");
-            cleanup_dng(&dng_path);
             return;
         }
 
@@ -652,8 +640,5 @@ mod printing_tests {
         }
 
         println!("\n=== All 6 visualizations saved to {}/ ===", TEST_OUTPUT_DIR);
-        
-        // Clean up temporary DNG file
-        cleanup_dng(&dng_path);
     }
 }

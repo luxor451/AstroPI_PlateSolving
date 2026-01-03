@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // Input file - can be CR3 or DNG
-    let input_file = Path::new("test_img/IMG_8993.CR3");
+    let input_file = Path::new("test_img/M101.CR3");
     let dng_file = Path::new("test.dng");
 
     // Convert CR3 to DNG if needed

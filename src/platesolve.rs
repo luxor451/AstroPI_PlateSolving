@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+
 /// Convert CR3 file to DNG using dnglab
 pub fn convert_cr3_to_dng(cr3_path: &Path, dng_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Check if dnglab is available in PATH or common locations
@@ -453,6 +454,7 @@ fn build_quad_index(quads: &[StarQuad], bucket_size: f64) -> std::collections::H
 /// # Arguments
 /// 
 /// * `image_quads` - Star quads extracted from the image.
+/// * `iteration` - The spiral search iteration number.
 /// * `search_ra_deg` - Right Ascension of the search center in degrees.
 /// * `search_dec_deg` - Declination of the search center in degrees.
 /// * `fov_arcsec` - Field of view in arcseconds.
@@ -463,6 +465,7 @@ fn build_quad_index(quads: &[StarQuad], bucket_size: f64) -> std::collections::H
 /// A `MatchAttemptResult` containing matched quad pairs and the search coordinates.
 fn try_match_at_position<'a>(
     image_quads: &'a [StarQuad],
+    iteration: usize,
     search_ra_deg: f64,
     search_dec_deg: f64,
     fov_arcsec: f64,
@@ -474,8 +477,8 @@ fn try_match_at_position<'a>(
     // Get stars from catalog at this position
     let stars_in_fov = get_stars_from_catalogue(&search_coord, fov_arcsec * 1.0, max_stars)?;
     
-    trace!("Retrieved {} stars from catalog at RA={:.4}°, Dec={:.4}°", 
-             stars_in_fov.len(), search_ra_deg, search_dec_deg);
+    info!("Iteration {}: RA={:.4}°, Dec={:.4}° - {} catalog stars", 
+             iteration, search_ra_deg, search_dec_deg, stars_in_fov.len());
     
     // Convert catalog stars to x,y coordinates
     let vec_star: Vec<(f64, f64)> = stars_in_fov
@@ -492,12 +495,11 @@ fn try_match_at_position<'a>(
 
     // Cap n to avoid memory explosion with large catalogs
     let n = (stars_in_fov.len() / image_quads.len() + 1).min(MAX_CATALOG_QUAD_HOPS);
-    info!("number of stars in fov: {}, number of image quads: {}, n : {}", stars_in_fov.len(), image_quads.len(), n);
     
     // Generate star quads from catalog
     let star_quad_from_cat = returns_all_star_quads(&vec_star, n);
     
-    trace!("Generated {} catalog quads.", star_quad_from_cat.len());
+    info!("Iteration {}: {} catalog quads generated", iteration, star_quad_from_cat.len());
     
     // Build spatial hash index for fast matching
     // Use bucket size slightly smaller than tolerance to ensure we check nearby buckets
@@ -568,6 +570,9 @@ fn try_match_at_position<'a>(
             used_image_barycenters.insert(barycenter_key);
         }
     }
+    
+    info!("Iteration {}: {} matched quads (need {})", 
+             iteration, matched_quads.len(), MIN_MATCHED_QUADS);
     
     Ok(MatchAttemptResult {
         matched_quads,
@@ -705,6 +710,7 @@ pub fn solve_plate_with_options(
                 // Try to match at this position (includes network fetch)
                 match try_match_at_position(
                     &image_analysis.star_quads,
+                    *iteration,
                     *search_ra_deg,
                     *search_dec_deg,
                     image_fov,
@@ -985,8 +991,10 @@ pub fn solve_plate_with_options(
                          re_iter + 1, new_center_ra_deg, new_center_dec_deg);
                 
                 // Re-fetch catalog stars centered on the new position
+                // Use re_iter + 1000 to distinguish re-centering iterations in logs
                 let new_match_result = try_match_at_position(
                     &image_analysis.star_quads,
+                    1000 + re_iter,
                     new_center_ra_deg,
                     new_center_dec_deg,
                     image_fov,

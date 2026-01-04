@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Instant;
 
 mod consts;
 mod coordinate;
@@ -37,8 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arcdegrees::new(54, 1, 14.40),
     );
 
-    // Solve the plate
+    // Solve the plate (time this operation)
+    let solve_start = Instant::now();
     let result = solve_plate(dng_file, &initial_coord)?;
+    let solve_elapsed = solve_start.elapsed();
+
+    println!("solve_plate elapsed: {:.3} s", solve_elapsed.as_secs_f64());
 
     // Display results
     if result.coeffs_x.is_some() {
@@ -62,3 +67,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+// (timing printed above)

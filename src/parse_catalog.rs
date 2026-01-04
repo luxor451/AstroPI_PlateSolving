@@ -1,99 +1,155 @@
-use reqwest::blocking::Client;
-use std::collections::HashMap;
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::error::Error;
+use std::fs::File;
+use std::path::Path;
+use once_cell::sync::Lazy;
+use crate::coordinate::*; // Assumes your Star struct is defined here
 
-use crate::consts::*;
-use crate::coordinate::*;
-
-/// Global HTTP client for VizieR queries - reuses connections across requests
-static VIZIER_CLIENT: OnceLock<Client> = OnceLock::new();
-
-/// Returns a shared HTTP client configured for VizieR queries.
-/// The client maintains a connection pool and reuses connections for better performance.
-fn get_vizier_client() -> &'static Client {
-    VIZIER_CLIENT.get_or_init(|| {
-        Client::builder()
-            .pool_max_idle_per_host(VIZIER_POOL_MAX_IDLE_PER_HOST)
-            .pool_idle_timeout(Duration::from_secs(VIZIER_POOL_IDLE_TIMEOUT_SECS))
-            .timeout(Duration::from_secs(VIZIER_REQUEST_TIMEOUT_SECS))
-            .tcp_keepalive(Duration::from_secs(VIZIER_TCP_KEEPALIVE_SECS))
-            .build()
-            .expect("Failed to create HTTP client")
-    })
+/// Represents a row in your local Gaia CSV catalogue.
+/// Matches header: source_id,ra,dec,phot_g_mean_mag
+#[derive(Debug, serde::Deserialize)]
+struct LocalCatalogRow {
+    ra: f64,
+    dec: f64,
+    phot_g_mean_mag: f64,
 }
 
-/// Queries the UCAC5 star catalog via VizieR TAP service for stars within a field of view.
+/// Queries a local CSV star catalog for stars within a field of view.
 ///
 /// # Arguments
 ///
-/// * `center_coordinate` - Center position (RA/Dec) of the search region.
+/// * `center_coordinate` - Center position (RA/Dec).
 /// * `fov` - Field of view size in arcseconds.
-/// * `nb_of_star` - Maximum number of stars to retrieve, ordered by brightness (Vmag).
+/// * `nb_of_star` - Maximum number of stars to retrieve.
+/// * `catalog_path` - Path to the local .csv file.
 ///
 /// # Returns
 ///
-/// A vector of `Star` objects containing RA/Dec coordinates in degrees.
+/// A vector of `Star` objects sorted by brightness.
 pub fn get_stars_from_catalogue(
     center_coordinate: &CoordinateEquatorial,
     fov: f64,
     nb_of_star: usize,
-) -> Result<Vec<Star>, Box<dyn std::error::Error>> {
-    let client = get_vizier_client();
-
-    let (ra, dec) = center_coordinate.to_degrees();
-    let fov = fov / 3600.0; // Convert arcseconds to degrees
+) -> Result<Vec<Star>, Box<dyn Error>> {
+    let (center_ra, center_dec) = center_coordinate.to_degrees();
+    
+    // Convert FOV from arcseconds to degrees
+    let fov_deg = fov / 3600.0;
+    let half_fov = fov_deg / 2.0;
 
     log::debug!(
-        "Searching for stars in FOV centered at RA: {:.6}, DEC: {:.6} with FOV: {:.6} degrees",
-        ra, dec, fov
+        "Searching local CSV for stars at RA: {:.6}, DEC: {:.6}, FOV: {:.6}°",
+        center_ra, center_dec, fov_deg
     );
 
-    let query = format!(
-        r#"
-        SELECT TOP {nb_of_star} *
-        FROM "{catalog}"
-        WHERE 1=CONTAINS(POINT('ICRS', RAJ2000, DEJ2000), BOX('ICRS', {ra}, {dec}, {fov}, {fov}))
-        ORDER BY Vmag
-        "#,
-        nb_of_star = nb_of_star,
-        catalog = VIZIER_CATALOG_TABLE,
-        ra = ra,
-        dec = dec,
-        fov = fov
-    );
+    // Load and cache the CSV into memory once (the file is sorted by ra, dec, mag).
+    static CATALOG: Lazy<Vec<LocalCatalogRow>> = Lazy::new(|| {
+        let path = Path::new("catalogue/gaia_local.csv");
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                log::error!("Failed to open catalog {}: {}", path.display(), e);
+                return Vec::new();
+            }
+        };
+        let mut rdr = csv::ReaderBuilder::new().has_headers(true).from_reader(file);
+        let mut rows: Vec<LocalCatalogRow> = Vec::new();
+        for res in rdr.deserialize() {
+            match res {
+                Ok(rec) => rows.push(rec),
+                Err(e) => log::warn!("Skipping bad row in catalog: {}", e),
+            }
+        }
+        rows
+    });
 
-    let mut form = HashMap::new();
-    form.insert("REQUEST", "doQuery");
-    form.insert("LANG", "ADQL");
-    form.insert("FORMAT", "json");
-    form.insert("QUERY", &query);
+    // We will collect candidates as tuples: (ra, dec, magnitude)
+    let mut candidates: Vec<(f64, f64, f64)> = Vec::new();
 
-    let json: serde_json::Value = client
-        .post(VIZIER_TAP_URL)
-        .form(&form)
-        .send()?
-        .json()?;
+    // Compute RA search interval(s), handling wraparound (0 - 360°)
+    let ra_min = (center_ra - half_fov).rem_euclid(360.0);
+    let ra_max = (center_ra + half_fov).rem_euclid(360.0);
 
-    let metadata = json["metadata"].as_array().unwrap();
-    let ra_idx = metadata
-        .iter()
-        .position(|m| m["name"] == "RAJ2000")
-        .unwrap();
-    let dec_idx = metadata
-        .iter()
-        .position(|m| m["name"] == "DEJ2000")
-        .unwrap();
+    // Helper: lower_bound (first index with ra >= value)
+    let lower_bound = |arr: &Vec<LocalCatalogRow>, value: f64| -> usize {
+        match arr.binary_search_by(|r| r.ra.partial_cmp(&value).unwrap_or(std::cmp::Ordering::Equal)) {
+            Ok(i) => i,
+            Err(i) => i,
+        }
+    };
 
-    let mut res = Vec::with_capacity(nb_of_star);
+    // Helper: upper_bound (first index with ra > value)
+    let upper_bound = |arr: &Vec<LocalCatalogRow>, value: f64| -> usize {
+        match arr.binary_search_by(|r| r.ra.partial_cmp(&value).unwrap_or(std::cmp::Ordering::Equal)) {
+            Ok(mut i) => {
+                // advance past equal elements
+                while i < arr.len() && (arr[i].ra - value).abs() < std::f64::EPSILON {
+                    i += 1;
+                }
+                i
+            }
+            Err(i) => i,
+        }
+    };
 
-    if let Some(data) = json["data"].as_array() {
-        for entry in data {
-            let ra = entry[ra_idx].as_f64().unwrap();
-            let dec = entry[dec_idx].as_f64().unwrap();
-            res.push(Star { ra, dec });
+    let arr = &*CATALOG;
+
+    // If catalog failed to load, fall back to empty set
+    if arr.is_empty() {
+        log::warn!("Catalog is empty, returning no stars.");
+        return Ok(Vec::new());
+    }
+
+    // Determine contiguous RA ranges to scan
+    let ranges: Vec<(usize, usize)> = if ra_min <= ra_max {
+        // single interval [ra_min, ra_max]
+        let start = lower_bound(arr, ra_min);
+        let end = upper_bound(arr, ra_max);
+        vec![(start, end)]
+    } else {
+        // wrap-around: [ra_min, 360) and [0, ra_max]
+        let start1 = lower_bound(arr, ra_min);
+        let end1 = arr.len();
+        let start2 = 0usize;
+        let end2 = upper_bound(arr, ra_max);
+        vec![(start1, end1), (start2, end2)]
+    };
+
+    // Scan the small subset(s) and filter by exact RA/Dec box
+    for (start, end) in ranges {
+        for rec in &arr[start..end] {
+            // Dec filter
+            if (rec.dec - center_dec).abs() > half_fov {
+                continue;
+            }
+
+            // RA delta (circular)
+            let mut delta_ra = (rec.ra - center_ra).abs();
+            if delta_ra > 180.0 {
+                delta_ra = 360.0 - delta_ra;
+            }
+            if delta_ra > half_fov {
+                continue;
+            }
+
+            candidates.push((rec.ra, rec.dec, rec.phot_g_mean_mag));
         }
     }
 
-    Ok(res)
+    // 3. Sort by Magnitude (Brightest stars have lower magnitude values)
+    // f64 doesn't implement Ord, so we use partial_cmp
+    candidates.sort_by(|a, b| {
+        a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // 4. Transform to your internal Star struct and take the top N
+    let result_stars: Vec<Star> = candidates
+        .into_iter()
+        .take(nb_of_star)
+        .map(|(ra, dec, _mag)| Star { ra, dec })
+        .collect();
+
+    log::info!(
+        "Found {} stars in local CSV catalog within FOV.", result_stars.len()
+    );
+    Ok(result_stars)
 }

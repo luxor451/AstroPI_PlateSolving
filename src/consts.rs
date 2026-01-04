@@ -13,7 +13,7 @@ pub const MATCHED_TOLERANCE: f64 = 0.002;
 /// Minimum number of matched quads required for a valid solution
 /// Higher = more confident but harder to solve
 /// Need enough to reject false positives through consensus
-pub const MIN_MATCHED_QUADS: usize = 10;
+pub const MIN_MATCHED_QUADS: usize = 40;
 
 /// Maximum graph hops for catalog quad generation (prevents memory explosion)
 pub const MAX_CATALOG_QUAD_HOPS: usize = 2;
@@ -23,10 +23,10 @@ pub const MAX_CATALOG_QUAD_HOPS: usize = 2;
 // =============================================================================
 
 /// Maximum number of spiral search iterations before giving up
-pub const MAX_SPIRAL_ITERATIONS: usize = 500;
+pub const MAX_SPIRAL_ITERATIONS: usize = 20000;
 
 /// Number of positions to process in parallel during spiral search
-pub const SPIRAL_BATCH_SIZE: usize = 8;
+pub const SPIRAL_BATCH_SIZE: usize = 16;
 
 // =============================================================================
 // Star Matching Refinement Constants
@@ -109,22 +109,22 @@ pub const CATALOG_STAR_MULTIPLIER: usize = 2;
 // =============================================================================
 // HTTP Client Constants (VizieR Connection)
 // =============================================================================
-
+#[allow(dead_code)]
 /// Maximum idle connections per host for VizieR HTTP client
 pub const VIZIER_POOL_MAX_IDLE_PER_HOST: usize = 16;
-
+#[allow(dead_code)]
 /// Idle timeout for VizieR HTTP connections in seconds
 pub const VIZIER_POOL_IDLE_TIMEOUT_SECS: u64 = 60;
-
+#[allow(dead_code)]
 /// Request timeout for VizieR HTTP requests in seconds
 pub const VIZIER_REQUEST_TIMEOUT_SECS: u64 = 30;
-
+#[allow(dead_code)]
 /// TCP keepalive interval for VizieR connections in seconds
 pub const VIZIER_TCP_KEEPALIVE_SECS: u64 = 30;
-
+#[allow(dead_code)]
 /// VizieR TAP service URL
 pub const VIZIER_TAP_URL: &str = "http://tapvizier.u-strasbg.fr/TAPVizieR/tap/sync";
-
+#[allow(dead_code)]
 /// VizieR catalog table name (UCAC5)
 pub const VIZIER_CATALOG_TABLE: &str = "I/322A/out";
 

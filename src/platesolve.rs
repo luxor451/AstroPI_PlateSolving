@@ -3,6 +3,7 @@ use crate::coordinate::*;
 use crate::parse_catalog::*;
 use crate::solver::*;
 use crate::star_quads::*;
+use crate::star_finding::*;
 use log::{debug, info, trace, warn};
 use rayon::prelude::*;
 use std::path::Path;

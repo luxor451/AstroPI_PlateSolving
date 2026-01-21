@@ -5,6 +5,7 @@ mod printing;
 mod solver;
 mod star_quads;
 mod platesolve;
+mod star_finding;
 
 #[cfg(test)]
 mod tests;

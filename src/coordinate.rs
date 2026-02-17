@@ -88,6 +88,10 @@ impl RaHoursMinutesSeconds {
             * (self.hours as f64 + (self.minutes as f64 / 60.0) + (self.seconds / 3600.0))
     }
 
+    pub fn to_hours(&self) -> f64 {
+        self.hours as f64 + (self.minutes as f64 / 60.0) + (self.seconds / 3600.0)
+    }
+
     pub fn to_radians(&self) -> f64 {
         self.to_degrees() * std::f64::consts::PI / 180.0
     }

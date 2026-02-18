@@ -17,7 +17,6 @@ pub fn convert_cr3_to_dng(cr3_path: &Path, dng_path: &Path) -> Result<(), Box<dy
     let dnglab_paths = [
         "dnglab",
         "/usr/local/bin/dnglab",
-        "/home/dimitryd/Documents/Travail/DocheSoftware/AstroPI/dnglab/target/release/dnglab",
     ];
 
     let mut dnglab_cmd = None;

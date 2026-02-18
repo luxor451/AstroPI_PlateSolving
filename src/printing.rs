@@ -7,6 +7,8 @@ use std::path::Path;
 
 use crate::consts::*;
 use crate::star_quads::*;
+use crate::platesolve::convert_cr3_to_dng;
+
 
 /// Options for rendering DNG images
 #[derive(Clone, Copy, Debug)]
@@ -46,32 +48,45 @@ fn load_dng_as_rgb(dng_path: &Path, mode: DngRenderMode) -> Result<RgbImage, Box
     let width = raw_image.width;
     let height = raw_image.height;
 
-    // Convert to grayscale by simple debayering (averaging 2x2 blocks)
+    // Convert to RGB by simple debayering (2x2 block binning)
     let gray_width = width / 2;
     let gray_height = height / 2;
 
-    let mut gray_values: Vec<u16> = Vec::with_capacity(gray_width * gray_height);
+    // Store (R, G, B) tuples
+    let mut rgb_values: Vec<(u16, u16, u16)> = Vec::with_capacity(gray_width * gray_height);
+    // Also keep a flat list for histogram calculation to preserve color balance
+    let mut all_channel_values: Vec<u16> = Vec::with_capacity(gray_width * gray_height * 3);
 
     for y in 0..gray_height {
         for x in 0..gray_width {
             let bayer_x = x * 2;
             let bayer_y = y * 2;
 
-            // Average the 2x2 Bayer block
-            let p00 = data[bayer_y * width + bayer_x] as u32;
-            let p01 = data[bayer_y * width + bayer_x + 1] as u32;
-            let p10 = data[(bayer_y + 1) * width + bayer_x] as u32;
-            let p11 = data[(bayer_y + 1) * width + bayer_x + 1] as u32;
+            // Extract the 2x2 Bayer block
+            // Assuming RGGB pattern for now:
+            // R  G
+            // G  B
+            let p00 = data[bayer_y * width + bayer_x] as u32;       // Red
+            let p01 = data[bayer_y * width + bayer_x + 1] as u32;   // Green 1
+            let p10 = data[(bayer_y + 1) * width + bayer_x] as u32; // Green 2
+            let p11 = data[(bayer_y + 1) * width + bayer_x + 1] as u32; // Blue
 
-            let avg = ((p00 + p01 + p10 + p11) / 4) as u16;
-            gray_values.push(avg);
+            let r = p00 as u16;
+            let g = ((p01 + p10) / 2) as u16;
+            let b = p11 as u16;
+
+            rgb_values.push((r, g, b));
+            all_channel_values.push(r);
+            all_channel_values.push(g);
+            all_channel_values.push(b);
         }
     }
 
     // Calculate min/max for different modes
     let (black_point, white_point) = match mode {
         DngRenderMode::Stretched { low_percentile, high_percentile } => {
-            let mut sorted_values = gray_values.clone();
+            // Use all channel values for global histogram stretch to preserve color balance
+            let mut sorted_values = all_channel_values;
             sorted_values.sort_unstable();
             
             let low_idx = ((sorted_values.len() as f64) * low_percentile) as usize;
@@ -81,8 +96,8 @@ fn load_dng_as_rgb(dng_path: &Path, mode: DngRenderMode) -> Result<RgbImage, Box
             (sorted_values[low_idx] as f64, sorted_values[high_idx] as f64)
         }
         DngRenderMode::Linear | DngRenderMode::Gamma(_) => {
-            let min_val = *gray_values.iter().min().unwrap_or(&0) as f64;
-            let max_val = *gray_values.iter().max().unwrap_or(&65535) as f64;
+            let min_val = *all_channel_values.iter().min().unwrap_or(&0) as f64;
+            let max_val = *all_channel_values.iter().max().unwrap_or(&65535) as f64;
             (min_val, max_val)
         }
     };
@@ -91,21 +106,24 @@ fn load_dng_as_rgb(dng_path: &Path, mode: DngRenderMode) -> Result<RgbImage, Box
 
     let mut img = RgbImage::new(gray_width as u32, gray_height as u32);
 
-    for (i, &value) in gray_values.iter().enumerate() {
+    for (i, &(r, g, b)) in rgb_values.iter().enumerate() {
         let x = (i % gray_width) as u32;
         let y = (i / gray_width) as u32;
 
-        // Normalize to 0-1 range
-        let normalized = ((value as f64 - black_point) / range).clamp(0.0, 1.0);
+        let process_channel = |val: u16| -> u8 {
+            // Normalize to 0-1 range
+            let normalized = ((val as f64 - black_point) / range).clamp(0.0, 1.0);
 
-        // Apply gamma if needed
-        let gamma_corrected = match mode {
-            DngRenderMode::Gamma(gamma) => normalized.powf(1.0 / gamma),
-            _ => normalized,
+            // Apply gamma if needed
+            let gamma_corrected = match mode {
+                DngRenderMode::Gamma(gamma) => normalized.powf(1.0 / gamma),
+                _ => normalized,
+            };
+
+            (gamma_corrected * 255.0).clamp(0.0, 255.0) as u8
         };
 
-        let pixel_value = (gamma_corrected * 255.0).clamp(0.0, 255.0) as u8;
-        img.put_pixel(x, y, Rgb([pixel_value, pixel_value, pixel_value]));
+        img.put_pixel(x, y, Rgb([process_channel(r), process_channel(g), process_channel(b)]));
     }
 
     Ok(img)
@@ -511,42 +529,42 @@ pub fn dng_to_png_with_mode(
     output_path: &Path,
     mode: DngRenderMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut img = load_dng_as_rgb(input_path, mode)?;
+    let img = load_dng_as_rgb(input_path, mode)?;
     
     // Draw a crosshair marker at the center of the image
-    let center_x = img.width() / 2;
-    let center_y = img.height() / 2;
-    let marker_color = Rgb([255u8, 0u8, 0u8]); // Bright red marker
+    // let center_x = img.width() / 2;
+    // let center_y = img.height() / 2;
+    // let marker_color = Rgb([255u8, 0u8, 0u8]); // Bright red marker
 
-    // Draw horizontal line of the crosshair
-    for dx in 0..=CROSSHAIR_MARKER_SIZE {
-        if center_x >= dx {
-            img.put_pixel(center_x - dx, center_y, marker_color);
-        }
-        if center_x + dx < img.width() {
-            img.put_pixel(center_x + dx, center_y, marker_color);
-        }
-    }
+    // // Draw horizontal line of the crosshair
+    // for dx in 0..=CROSSHAIR_MARKER_SIZE {
+    //     if center_x >= dx {
+    //         img.put_pixel(center_x - dx, center_y, marker_color);
+    //     }
+    //     if center_x + dx < img.width() {
+    //         img.put_pixel(center_x + dx, center_y, marker_color);
+    //     }
+    // }
 
-    // Draw vertical line of the crosshair
-    for dy in 0..=CROSSHAIR_MARKER_SIZE {
-        if center_y >= dy {
-            img.put_pixel(center_x, center_y - dy, marker_color);
-        }
-        if center_y + dy < img.height() {
-            img.put_pixel(center_x, center_y + dy, marker_color);
-        }
-    }
+    // // Draw vertical line of the crosshair
+    // for dy in 0..=CROSSHAIR_MARKER_SIZE {
+    //     if center_y >= dy {
+    //         img.put_pixel(center_x, center_y - dy, marker_color);
+    //     }
+    //     if center_y + dy < img.height() {
+    //         img.put_pixel(center_x, center_y + dy, marker_color);
+    //     }
+    // }
 
-    // Draw a small circle around the center for better visibility
-    for angle in 0..360 {
-        let rad = (angle as f64).to_radians();
-        let cx = (center_x as f64 + CENTER_CIRCLE_RADIUS as f64 * rad.cos()).round() as u32;
-        let cy = (center_y as f64 + CENTER_CIRCLE_RADIUS as f64 * rad.sin()).round() as u32;
-        if cx < img.width() && cy < img.height() {
-            img.put_pixel(cx, cy, marker_color);
-        }
-    }
+    // // Draw a small circle around the center for better visibility
+    // for angle in 0..360 {
+    //     let rad = (angle as f64).to_radians();
+    //     let cx = (center_x as f64 + CENTER_CIRCLE_RADIUS as f64 * rad.cos()).round() as u32;
+    //     let cy = (center_y as f64 + CENTER_CIRCLE_RADIUS as f64 * rad.sin()).round() as u32;
+    //     if cx < img.width() && cy < img.height() {
+    //         img.put_pixel(cx, cy, marker_color);
+    //     }
+    // }
 
     // Save as PNG
     img.save(output_path)?;
@@ -560,4 +578,15 @@ pub fn dng_to_png_with_mode(
 #[allow(dead_code)]
 pub fn dng_to_png(input_path: &Path, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     dng_to_png_with_mode(input_path, output_path, DngRenderMode::default())
+}
+
+
+/// Converts a CR3 file to PNG by first converting to DNG and then to PNG.
+#[allow(dead_code)]
+pub fn cr3_to_png(input_path: &Path, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let dng_path = input_path.with_extension("dng");
+    convert_cr3_to_dng(input_path, &dng_path)?;
+    dng_to_png(&dng_path, output_path)?;
+    std::fs::remove_file(dng_path)?; // Clean up the intermediate DNG file
+    Ok(())
 }

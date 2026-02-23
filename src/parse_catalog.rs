@@ -43,8 +43,51 @@ pub fn get_stars_from_catalogue(
 
     // Load and cache the CSV into memory once (the file is sorted by ra, dec, mag).
     static CATALOG: Lazy<Vec<LocalCatalogRow>> = Lazy::new(|| {
-        let path = Path::new("catalogue/gaia_local.csv");
-        let file = match File::open(path) {
+        // Try several known locations, then fall back to a recursive search.
+        let candidate_paths = [
+            "AstroPI_PlateSolving/catalogue/gaia_local.csv",
+            "catalogue/gaia_local.csv",
+            "Gaia_dowloader/gaia_local.csv",
+        ];
+
+        let found_path = candidate_paths
+            .iter()
+            .map(Path::new)
+            .find(|p| p.exists())
+            .map(|p| p.to_path_buf())
+            .or_else(|| {
+                // Recursive search from cwd and common parent directories
+                let search_roots = [
+                    std::env::current_dir().ok(),
+                    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())),
+                ];
+                for root in search_roots.iter().flatten() {
+                    for entry in walkdir::WalkDir::new(root)
+                        .max_depth(5)
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                    {
+                        if entry.file_name() == "gaia_local.csv" {
+                            return Some(entry.into_path());
+                        }
+                    }
+                }
+                None
+            });
+
+        let path = match found_path {
+            Some(p) => {
+                println!("[catalog] Found catalog at: {}", p.display());
+                p
+            }
+            None => {
+                log::error!("Could not find gaia_local.csv in any known location");
+                eprintln!("[catalog] ERROR: Could not find gaia_local.csv anywhere!");
+                return Vec::new();
+            }
+        };
+
+        let file = match File::open(&path) {
             Ok(f) => f,
             Err(e) => {
                 log::error!("Failed to open catalog {}: {}", path.display(), e);
@@ -59,6 +102,7 @@ pub fn get_stars_from_catalogue(
                 Err(e) => log::warn!("Skipping bad row in catalog: {}", e),
             }
         }
+        println!("[catalog] Loaded {} stars from {}", rows.len(), path.display());
         rows
     });
 

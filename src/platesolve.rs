@@ -479,6 +479,8 @@ fn try_match_at_position<'a>(
     // Get stars from catalog at this position
     let stars_in_fov = get_stars_from_catalogue(&search_coord, fov_arcsec * 1.0, max_stars)?;
     
+    println!("[platesolve] Iteration {}: RA={:.4}°, Dec={:.4}° - {} catalog stars, FOV={:.0}\", max_stars={}", 
+             iteration, search_ra_deg, search_dec_deg, stars_in_fov.len(), fov_arcsec, max_stars);
     info!("Iteration {}: RA={:.4}°, Dec={:.4}° - {} catalog stars", 
              iteration, search_ra_deg, search_dec_deg, stars_in_fov.len());
     
@@ -496,11 +498,31 @@ fn try_match_at_position<'a>(
         .collect();
 
     // Cap n to avoid memory explosion with large catalogs
+    if image_quads.is_empty() {
+        println!("[platesolve] Iteration {}: no image quads — skipping", iteration);
+        return Ok(MatchAttemptResult {
+            matched_quads: Vec::new(),
+            search_coord_ra_deg: search_ra_deg,
+            search_coord_dec_deg: search_dec_deg,
+            catalog_stars_xy: vec_star,
+        });
+    }
+    if stars_in_fov.is_empty() {
+        println!("[platesolve] Iteration {}: no catalog stars found at this position — skipping", iteration);
+        return Ok(MatchAttemptResult {
+            matched_quads: Vec::new(),
+            search_coord_ra_deg: search_ra_deg,
+            search_coord_dec_deg: search_dec_deg,
+            catalog_stars_xy: vec_star,
+        });
+    }
     let n = (stars_in_fov.len() / image_quads.len() + 1).min(MAX_CATALOG_QUAD_HOPS);
     
     // Generate star quads from catalog
     let star_quad_from_cat = returns_all_star_quads(&vec_star, n);
     
+    println!("[platesolve] Iteration {}: {} catalog quads, {} image quads, n={}",
+             iteration, star_quad_from_cat.len(), image_quads.len(), n);
     info!("Iteration {}: {} catalog quads generated", iteration, star_quad_from_cat.len());
     
     // Build spatial hash index for fast matching
@@ -573,6 +595,8 @@ fn try_match_at_position<'a>(
         }
     }
     
+    println!("[platesolve] Iteration {}: {} matched quads (need >= {})",
+             iteration, matched_quads.len(), MIN_MATCHED_QUADS);
     info!("Iteration {}: {} matched quads (need {})", 
              iteration, matched_quads.len(), MIN_MATCHED_QUADS);
     
@@ -644,8 +668,23 @@ pub fn solve_plate_with_options(
     // Analyze the image
     let image_analysis = analyze_image(&working_path, cam)?;
 
+    println!("[platesolve] Image size: {}x{}", image_analysis.width, image_analysis.height);
+    println!("[platesolve] Star barycenters found: {}", image_analysis.star_barycenters.len());
+    println!("[platesolve] Star quads generated: {}", image_analysis.star_quads.len());
     info!("Found {} star quads in the image.", image_analysis.star_quads.len());
     debug!("Found {} star barycenters in the image.", image_analysis.star_barycenters.len());
+
+    if image_analysis.star_barycenters.is_empty() {
+        println!("[platesolve] WARNING: No stars detected in image! Check exposure/threshold.");
+        println!("[platesolve]   Camera config: pixel_size={:.1}µm, focal_length={:.1}mm, bitdepth={}",
+                 cam.pixel_size_micron, cam.focal_length_mm, cam.bitdepth);
+        println!("[platesolve]   Star threshold: {:.1}% of max ({:.0})",
+                 STAR_THRESHOLD * 100.0, (2.0_f32.powi(cam.bitdepth as i32) - 1.0) * STAR_THRESHOLD);
+    }
+
+    if image_analysis.star_quads.is_empty() {
+        println!("[platesolve] WARNING: No star quads could be formed (need >= 4 stars with >= {} pixels each).", MIN_STAR_PIXELS);
+    }
 
     // Calculate field of view in arcseconds
     let pixel_resolution: f64 = ARCSEC_PER_RADIAN * cam.pixel_size_micron / cam.focal_length_mm;
@@ -657,11 +696,15 @@ pub fn solve_plate_with_options(
     let fov_x_deg = image_fov_x_arcsec / 3600.0;
     let fov_y_deg = image_fov_y_arcsec / 3600.0;
     
+    println!("[platesolve] Image FOV: {:.1}\" x {:.1}\" ({:.3}° x {:.3}°)",
+             image_fov_x_arcsec, image_fov_y_arcsec, fov_x_deg, fov_y_deg);
+    println!("[platesolve] Expected pixel scale: {:.3} arcsec/pixel", cam.expected_pixel_scale());
     debug!("Image FOV: {:.2}\" x {:.2}\" ({:.4}° x {:.4}°)", 
              image_fov_x_arcsec, image_fov_y_arcsec, fov_x_deg, fov_y_deg);
 
     let nb_of_stars = image_analysis.star_barycenters.len();
     let max_stars = nb_of_stars * CATALOG_STAR_MULTIPLIER;
+    println!("[platesolve] Max catalog stars to fetch: {} ({}x multiplier)", max_stars, CATALOG_STAR_MULTIPLIER);
     
     // Get initial coordinates in degrees
     let (initial_ra_deg, initial_dec_deg) = initial_coord.to_degrees();
@@ -801,10 +844,10 @@ pub fn solve_plate_with_options(
     let matched_count = best_matched_quads.len();
     
     if matched_count >= MIN_MATCHED_QUADS {
-        info!("Solution found with {} matched quads at RA={:.4}°, Dec={:.4}°", 
+        println!("[platesolve] Solution found with {} matched quads at RA={:.4}°, Dec={:.4}°", 
                  matched_count, best_search_ra_deg, best_search_dec_deg);
     } else {
-        info!("Spiral search completed. Best result: {} matches (need {} for solution).", 
+        println!("[platesolve] Spiral search completed. Best result: {} matches (need >= {} for solution).", 
                  matched_count, MIN_MATCHED_QUADS);
     }
 

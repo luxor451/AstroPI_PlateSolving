@@ -48,6 +48,21 @@ fn load_dng_as_rgb(dng_path: &Path, mode: DngRenderMode) -> Result<RgbImage, Box
     let width = raw_image.width;
     let height = raw_image.height;
 
+    // White balance coefficients from the file (RGBE order).
+    // Normalise so that the green multiplier equals 1.0.
+    let wb = raw_image.wb_coeffs; // [R, G, B, G2]
+    let g_coeff = if wb[1] > 0.0 { wb[1] } else { 1.0 };
+    let wb_r = (wb[0] / g_coeff) as f64;
+    let wb_g = 1.0_f64;
+    let wb_b = (wb[2] / g_coeff) as f64;
+
+    // Black levels per channel (RGBE order as well)
+    let bl = raw_image.blacklevels;
+    let bl_r = bl[0] as f64;
+    let bl_g1 = bl[1] as f64;
+    let bl_g2 = bl[2] as f64; // may differ from bl_g1
+    let bl_b = bl[3] as f64;
+
     // Convert to RGB by simple debayering (2x2 block binning)
     let gray_width = width / 2;
     let gray_height = height / 2;
@@ -66,14 +81,15 @@ fn load_dng_as_rgb(dng_path: &Path, mode: DngRenderMode) -> Result<RgbImage, Box
             // Assuming RGGB pattern for now:
             // R  G
             // G  B
-            let p00 = data[bayer_y * width + bayer_x] as u32;       // Red
-            let p01 = data[bayer_y * width + bayer_x + 1] as u32;   // Green 1
-            let p10 = data[(bayer_y + 1) * width + bayer_x] as u32; // Green 2
-            let p11 = data[(bayer_y + 1) * width + bayer_x + 1] as u32; // Blue
+            let p00 = (data[bayer_y * width + bayer_x] as f64 - bl_r).max(0.0);          // Red
+            let p01 = (data[bayer_y * width + bayer_x + 1] as f64 - bl_g1).max(0.0);     // Green 1
+            let p10 = (data[(bayer_y + 1) * width + bayer_x] as f64 - bl_g2).max(0.0);   // Green 2
+            let p11 = (data[(bayer_y + 1) * width + bayer_x + 1] as f64 - bl_b).max(0.0); // Blue
 
-            let r = p00 as u16;
-            let g = ((p01 + p10) / 2) as u16;
-            let b = p11 as u16;
+            // Apply white balance multipliers
+            let r = (p00 * wb_r).min(65535.0) as u16;
+            let g = ((p01 + p10) / 2.0 * wb_g).min(65535.0) as u16;
+            let b = (p11 * wb_b).min(65535.0) as u16;
 
             rgb_values.push((r, g, b));
             all_channel_values.push(r);

@@ -166,10 +166,10 @@ pub const VIZIER_CATALOG_TABLE: &str = "I/322A/out";
 // =============================================================================
 
 /// Default low percentile for histogram stretch
-pub const HISTOGRAM_STRETCH_LOW_PERCENTILE: f64 = 0.01;
+pub const HISTOGRAM_STRETCH_LOW_PERCENTILE: f64 = 0.05;
 
 /// Default high percentile for histogram stretch
-pub const HISTOGRAM_STRETCH_HIGH_PERCENTILE: f64 = 0.995;
+pub const HISTOGRAM_STRETCH_HIGH_PERCENTILE: f64 = 0.99;
 
 /// Pixel value stretch factor for PNG export
 pub const PIXEL_STRETCH_FACTOR: u32 = 4;

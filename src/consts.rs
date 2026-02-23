@@ -78,13 +78,46 @@ pub const STAR_GRAPH_K_NEIGHBORS: usize = 6;
 // Camera/Telescope Constants
 // =============================================================================
 
-/// Camera pixel size in microns
+/// Runtime-configurable camera/telescope parameters.
+///
+/// These values can be set via the `/update_camera_settings` endpoint
+/// so that different optical setups work without recompilation.
+#[derive(Debug, Clone)]
+pub struct CameraConfig {
+    /// Camera pixel size in microns
+    pub pixel_size_micron: f64,
+    /// Telescope focal length in millimeters
+    pub focal_length_mm: f64,
+    /// Camera bit depth
+    pub bitdepth: u16,
+}
+
+impl Default for CameraConfig {
+    fn default() -> Self {
+        Self {
+            pixel_size_micron: 6.0,
+            focal_length_mm: 714.0,
+            bitdepth: 14,
+        }
+    }
+}
+
+impl CameraConfig {
+    /// Compute the expected pixel scale in arcsec/pixel.
+    ///
+    /// Formula: 206.265 * pixel_size_μm / focal_length_mm
+    pub fn expected_pixel_scale(&self) -> f64 {
+        ARCSEC_PER_RADIAN * self.pixel_size_micron / self.focal_length_mm
+    }
+}
+
+/// Default camera pixel size in microns (used when no config is provided)
 pub const PIXEL_SIZE_MICRON: f64 = 6.0;
 
-/// Telescope focal length in millimeters
+/// Default telescope focal length in millimeters
 pub const TELESCOPE_FOCAL_LENGTH: f64 = 714.0;
 
-/// Camera bit depth
+/// Default camera bit depth
 pub const BITDEPTH: u16 = 14;
 
 /// Conversion factor from focal length to pixel scale (arcsec/pixel = 206.265 * pixel_size_um / focal_length_mm)

@@ -272,12 +272,14 @@ pub fn get_image_size(file_path: &Path) -> Result<(usize, usize), Box<dyn std::e
 /// # Arguments
 ///
 /// * `file_path` - Path to the DNG file.
+/// * `cam` - Camera configuration (bit depth, etc.).
 ///
 /// # Returns
 ///
 /// A vector of `(x, y, value)` tuples where coordinates are centered at the image center.
 pub fn get_pixel_matrix_from_dng(
     file_path: &Path,
+    cam: &CameraConfig,
 ) -> Result<Vec<(i32, i32, u16)>, Box<dyn std::error::Error>> {
     let raw = decode_file(file_path)?;
     let w = raw.width as usize;
@@ -290,7 +292,7 @@ pub fn get_pixel_matrix_from_dng(
     let flat: Vec<u16> = match raw.data {
         RawImageData::Integer(v) => v,
         RawImageData::Float(v) => {
-            let maxval = (2u32.pow(BITDEPTH as u32) - 1) as f32;
+            let maxval = (2u32.pow(cam.bitdepth as u32) - 1) as f32;
             v.into_iter()
                 .map(|f| (f.clamp(0.0, 1.0) * maxval) as u16)
                 .collect()

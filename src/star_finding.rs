@@ -24,13 +24,14 @@ pub fn calculate_star_barycenters(
     pixels: &[(i32, i32, u16)],
     width: usize,
     height: usize,
+    cam: &CameraConfig,
 ) -> Vec<StarPosXY> {
     let solve_start = Instant::now();
     if pixels.is_empty() || width == 0 || height == 0 {
         return Vec::new();
     }
 
-    let star_threshold = ((2.0_f32.powi(BITDEPTH as i32) - 1.0) * STAR_THRESHOLD) as u16;
+    let star_threshold = ((2.0_f32.powi(cam.bitdepth as i32) - 1.0) * STAR_THRESHOLD) as u16;
     
     let cx = (width / 2) as i32;
     let cy = (height / 2) as i32;

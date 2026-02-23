@@ -194,15 +194,17 @@ impl std::fmt::Display for PlateSolvingResult {
 /// # Arguments
 ///
 /// * `file_path` - Path to the DNG file to analyze.
+/// * `cam` - Camera configuration (bit depth, etc.).
 ///
 /// # Returns
 ///
 /// An `ImageAnalysisResult` containing star quads, pixel data, barycenters, and image dimensions.
 pub fn analyze_image(
     file_path: &Path,
+    cam: &CameraConfig,
 ) -> Result<ImageAnalysisResult, Box<dyn std::error::Error>> {
     let (width, height) = get_image_size(file_path)?;
-    let centered_pixels = get_pixel_matrix_from_dng(file_path)?;
+    let centered_pixels = get_pixel_matrix_from_dng(file_path, cam)?;
 
     trace!(
         "Pixels above 16000: {}",
@@ -213,7 +215,7 @@ pub fn analyze_image(
     );
 
     debug!("Calculating star barycenters...");
-    let star_barycenters = calculate_star_barycenters(&centered_pixels, width, height);
+    let star_barycenters = calculate_star_barycenters(&centered_pixels, width, height, cam);
     debug!("Found {} star barycenters.", star_barycenters.len());
 
     debug!("Calculating star quads...");
@@ -602,7 +604,7 @@ pub fn solve_plate(
     file_path: &Path,
     initial_coord: &CoordinateEquatorial,
 ) -> Result<PlateSolvingResult, Box<dyn std::error::Error>> {
-    solve_plate_with_options(file_path, initial_coord, MAX_SPIRAL_ITERATIONS)
+    solve_plate_with_options(file_path, initial_coord, MAX_SPIRAL_ITERATIONS, &CameraConfig::default())
 }
 
 /// Performs plate solving on a DNG image with configurable spiral search options.
@@ -626,6 +628,7 @@ pub fn solve_plate_with_options(
     file_path: &Path,
     initial_coord: &CoordinateEquatorial,
     max_spiral_iterations: usize,
+    cam: &CameraConfig,
 ) -> Result<PlateSolvingResult, Box<dyn std::error::Error>> {
     // Check if we need to convert CR3 to DNG
     let (working_path, _temp_dir) = if file_path.extension().map(|e| e.to_ascii_lowercase()) == Some("cr3".into()) {
@@ -639,13 +642,13 @@ pub fn solve_plate_with_options(
     };
 
     // Analyze the image
-    let image_analysis = analyze_image(&working_path)?;
+    let image_analysis = analyze_image(&working_path, cam)?;
 
     info!("Found {} star quads in the image.", image_analysis.star_quads.len());
     debug!("Found {} star barycenters in the image.", image_analysis.star_barycenters.len());
 
     // Calculate field of view in arcseconds
-    let pixel_resolution: f64 = ARCSEC_PER_RADIAN * PIXEL_SIZE_MICRON / TELESCOPE_FOCAL_LENGTH;
+    let pixel_resolution: f64 = ARCSEC_PER_RADIAN * cam.pixel_size_micron / cam.focal_length_mm;
     let image_fov_x_arcsec = pixel_resolution * image_analysis.width as f64;
     let image_fov_y_arcsec = pixel_resolution * image_analysis.height as f64;
     let image_fov = image_fov_x_arcsec.max(image_fov_y_arcsec);
@@ -751,8 +754,9 @@ pub fn solve_plate_with_options(
                 let test_transform = TransformCoefficients::new(test_coeffs_x, test_coeffs_y);
                 let scale = test_transform.scale();
                 
-                let scale_min = EXPECTED_PIXEL_SCALE * (1.0 - SCALE_TOLERANCE_FRACTION);
-                let scale_max = EXPECTED_PIXEL_SCALE * (1.0 + SCALE_TOLERANCE_FRACTION);
+                let expected_scale = cam.expected_pixel_scale();
+                let scale_min = expected_scale * (1.0 - SCALE_TOLERANCE_FRACTION);
+                let scale_max = expected_scale * (1.0 + SCALE_TOLERANCE_FRACTION);
                 
                 if scale < scale_min || scale > scale_max {
                     debug!("Rejecting position {}: scale {:.4} outside range [{:.4}, {:.4}]",
@@ -834,8 +838,9 @@ pub fn solve_plate_with_options(
         
         // Validate scale - reject solutions with implausible scales
         let scale = transform.scale();
-        let scale_min = EXPECTED_PIXEL_SCALE * (1.0 - SCALE_TOLERANCE_FRACTION);
-        let scale_max = EXPECTED_PIXEL_SCALE * (1.0 + SCALE_TOLERANCE_FRACTION);
+        let expected_scale = cam.expected_pixel_scale();
+        let scale_min = expected_scale * (1.0 - SCALE_TOLERANCE_FRACTION);
+        let scale_max = expected_scale * (1.0 + SCALE_TOLERANCE_FRACTION);
         
         if scale < scale_min || scale > scale_max {
             warn!("Rejecting solution: scale {:.4} arcsec/pixel is outside expected range [{:.4}, {:.4}]",

@@ -171,8 +171,8 @@ pub const HISTOGRAM_STRETCH_LOW_PERCENTILE: f64 = 0.05;
 /// Default high percentile for histogram stretch
 pub const HISTOGRAM_STRETCH_HIGH_PERCENTILE: f64 = 0.99;
 
-/// Pixel value stretch factor for PNG export
-pub const PIXEL_STRETCH_FACTOR: u32 = 4;
+/// Pixel value stretch factor for PNG export (1 = no stretch)
+pub const PIXEL_STRETCH_FACTOR: u32 = 1;
 
 /// Size of crosshair marker in pixels (for center marking)
 pub const CROSSHAIR_MARKER_SIZE: u32 = 20;

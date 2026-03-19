@@ -24,11 +24,10 @@ pub enum DngRenderMode {
 
 impl Default for DngRenderMode {
     fn default() -> Self {
-        // DngRenderMode::Stretched { 
-        //     low_percentile: HISTOGRAM_STRETCH_LOW_PERCENTILE, 
-        //     high_percentile: HISTOGRAM_STRETCH_HIGH_PERCENTILE 
-        // }
-        DngRenderMode::Linear
+        DngRenderMode::Stretched { 
+            low_percentile: HISTOGRAM_STRETCH_LOW_PERCENTILE, 
+            high_percentile: HISTOGRAM_STRETCH_HIGH_PERCENTILE 
+        }
     }
 }
 

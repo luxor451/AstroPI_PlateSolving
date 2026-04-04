@@ -137,7 +137,12 @@ pub const EXPECTED_PIXEL_SCALE: f64 = 1.4;
 pub const SCALE_TOLERANCE_FRACTION: f64 = 0.50;
 
 /// Multiplier for maximum stars to fetch from catalog (relative to detected stars)
-pub const CATALOG_STAR_MULTIPLIER: usize = 2;
+pub const CATALOG_STAR_MULTIPLIER: usize = 10;
+
+/// Minimum catalog stars to fetch regardless of how few stars were detected.
+/// Avoids degenerate cases where poor star detection yields only a handful of
+/// catalog entries — not enough to form the quads needed for reliable matching.
+pub const MIN_CATALOG_STARS: usize = 50;
 
 // =============================================================================
 // HTTP Client Constants (VizieR Connection)

@@ -703,8 +703,9 @@ pub fn solve_plate_with_options(
              image_fov_x_arcsec, image_fov_y_arcsec, fov_x_deg, fov_y_deg);
 
     let nb_of_stars = image_analysis.star_barycenters.len();
-    let max_stars = nb_of_stars * CATALOG_STAR_MULTIPLIER;
-    println!("[platesolve] Max catalog stars to fetch: {} ({}x multiplier)", max_stars, CATALOG_STAR_MULTIPLIER);
+    let max_stars = (nb_of_stars * CATALOG_STAR_MULTIPLIER).max(MIN_CATALOG_STARS);
+    println!("[platesolve] Max catalog stars to fetch: {} ({}x detected={}, floor={})",
+             max_stars, CATALOG_STAR_MULTIPLIER, nb_of_stars, MIN_CATALOG_STARS);
     
     // Get initial coordinates in degrees
     let (initial_ra_deg, initial_dec_deg) = initial_coord.to_degrees();

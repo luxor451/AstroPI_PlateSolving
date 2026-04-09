@@ -486,7 +486,7 @@ mod printing_tests {
         println!("Output directory: {}/", TEST_OUTPUT_DIR);
 
         // Analyze image first to get dimensions and star positions
-        let image_analysis = match analyze_image(Path::new(dng_path)) {
+        let image_analysis = match analyze_image(Path::new(dng_path), &crate::consts::CameraConfig::default()) {
             Ok(analysis) => analysis,
             Err(e) => {
                 println!("✗ Failed to analyze image: {}", e);

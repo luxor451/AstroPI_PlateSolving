@@ -132,17 +132,28 @@ pub const ARCSEC_PER_RADIAN: f64 = 206.265;
 pub const EXPECTED_PIXEL_SCALE: f64 = 1.4;
 
 /// Tolerance for pixel scale validation (fraction of expected scale)
-/// e.g., 0.5 means accept scales within ±50% of expected
-/// 1.4 * 0.5 = 0.7, so range is 0.7 to 2.1 arcsec/pixel (covers 714mm to 1200mm setups)
-pub const SCALE_TOLERANCE_FRACTION: f64 = 0.50;
+/// e.g., 0.70 means accept scales within ±70% of expected
+/// With expected=1.733 (714mm/6µm): range is 0.52 to 2.94 arcsec/pixel
+/// Wide enough to cover test images and minor miscalibration of focal length
+pub const SCALE_TOLERANCE_FRACTION: f64 = 0.70;
 
-/// Multiplier for maximum stars to fetch from catalog (relative to detected stars)
-pub const CATALOG_STAR_MULTIPLIER: usize = 10;
+/// Multiplier for maximum stars to fetch from catalog (relative to detected stars).
+/// Keep this at 2-3: the catalog K-NN graph must have similar density to the image
+/// K-NN graph or the quad shapes won't match.  A 10× multiplier inserts many faint
+/// catalog stars between the bright image stars, breaking K-NN correspondence.
+pub const CATALOG_STAR_MULTIPLIER: usize = 2;
 
 /// Minimum catalog stars to fetch regardless of how few stars were detected.
-/// Avoids degenerate cases where poor star detection yields only a handful of
-/// catalog entries — not enough to form the quads needed for reliable matching.
-pub const MIN_CATALOG_STARS: usize = 50;
+/// With CATALOG_STAR_MULTIPLIER=2, very sparse images (3-4 stars) need at least
+/// this many catalog stars to form enough quads.
+pub const MIN_CATALOG_STARS: usize = 20;
+
+/// When the catalog has this many stars or fewer, use the maximum BFS hop depth
+/// for quad generation so ALL 4-star combinations are covered.  This guarantees
+/// every quad formed from image stars also appears in the catalog quad list.
+/// Above this threshold the all-combinations approach becomes too expensive
+/// and we fall back to the standard K-NN formula.
+pub const SMALL_CATALOG_THRESHOLD: usize = 35;
 
 // =============================================================================
 // HTTP Client Constants (VizieR Connection)

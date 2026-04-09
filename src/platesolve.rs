@@ -516,7 +516,15 @@ fn try_match_at_position<'a>(
             catalog_stars_xy: vec_star,
         });
     }
-    let n = (stars_in_fov.len() / image_quads.len() + 1).min(MAX_CATALOG_QUAD_HOPS);
+    // For small catalogs use maximum BFS depth so ALL 4-star combinations are
+    // generated, guaranteeing every image-star quad has a matching catalog quad.
+    // For larger catalogs the all-combinations approach is too expensive and
+    // the standard formula (capped at MAX_CATALOG_QUAD_HOPS) is used instead.
+    let n = if stars_in_fov.len() <= SMALL_CATALOG_THRESHOLD {
+        MAX_CATALOG_QUAD_HOPS
+    } else {
+        (stars_in_fov.len() / image_quads.len() + 1).min(MAX_CATALOG_QUAD_HOPS)
+    };
     
     // Generate star quads from catalog
     let star_quad_from_cat = returns_all_star_quads(&vec_star, n);
@@ -786,26 +794,32 @@ pub fn solve_plate_with_options(
                      iteration, match_result.search_coord_ra_deg, 
                      match_result.search_coord_dec_deg, matched_count);
             
-            // Early scale validation: compute rough transformation and check scale
+            // Early scale validation: compute rough transformation and check scale.
+            // Uses a generous tolerance (2×) to avoid false rejections — the final
+            // scale check after the spiral search applies the configured tolerance.
             if matched_count >= MIN_MATCHED_QUADS {
                 let img_x: Vec<f64> = match_result.matched_quads.iter().map(|(q, _)| q.barycenter.0).collect();
                 let img_y: Vec<f64> = match_result.matched_quads.iter().map(|(q, _)| q.barycenter.1).collect();
                 let cat_x: Vec<f64> = match_result.matched_quads.iter().map(|(_, q)| q.barycenter.0).collect();
                 let cat_y: Vec<f64> = match_result.matched_quads.iter().map(|(_, q)| q.barycenter.1).collect();
-                
+
                 let test_coeffs_x = solve_projection(&cat_x, &img_x, &img_y);
                 let test_coeffs_y = solve_projection(&cat_y, &img_x, &img_y);
                 let test_transform = TransformCoefficients::new(test_coeffs_x, test_coeffs_y);
                 let scale = test_transform.scale();
-                
+
                 let expected_scale = cam.expected_pixel_scale();
-                let scale_min = expected_scale * (1.0 - SCALE_TOLERANCE_FRACTION);
-                let scale_max = expected_scale * (1.0 + SCALE_TOLERANCE_FRACTION);
-                
+                // Early filter uses 2× the configured tolerance to be permissive
+                let early_tol = SCALE_TOLERANCE_FRACTION * 2.0;
+                let scale_min = expected_scale * (1.0 - early_tol);
+                let scale_max = expected_scale * (1.0 + early_tol);
+
                 if scale < scale_min || scale > scale_max {
-                    debug!("Rejecting position {}: scale {:.4} outside range [{:.4}, {:.4}]",
-                           iteration, scale, scale_min, scale_max);
-                    continue; // Skip this solution, keep searching
+                    println!("[platesolve] Early scale reject iter {}: {:.4}\"/px outside [{:.4},{:.4}]",
+                             iteration, scale, scale_min, scale_max);
+                    // Reset flag so spiral search continues
+                    solution_found.store(false, Ordering::Relaxed);
+                    continue;
                 }
             }
             
